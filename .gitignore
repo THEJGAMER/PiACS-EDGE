@@ -1,0 +1,12 @@
+# Exclude specific runtime configuration files containing database passwords
+config.json
+
+# Exclude local SQLite cache survivability mirrors
+edge_cache.db
+
+# Exclude engine console output log files
+*.log
+edge_engine.log
+
+# Exclude compiled Go binaries/executable outputs
+piacs-edge

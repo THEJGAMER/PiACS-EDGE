@@ -1,150 +1,292 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/warthog618/go-gpiocdev"
 )
 
-type ReaderConfig struct {
-	GpioChipDevice string
-	WiegandD0Pin   int
-	WiegandD1Pin   int
-	LockRelayPin   int
-	BuzzerPin      int
-	LedRedPin      int
-	LedGreenPin    int
-	TimeoutMs      int
-}
-
 type WiegandReader struct {
-	mu           sync.Mutex
-	config       ReaderConfig
-	bitBuffer    string
-	bitCount     int
-	lastBitTime  time.Time
-	isProcessing bool
-
-	chip         *gpiocdev.Chip
-	lineD0       *gpiocdev.Line
-	lineD1       *gpiocdev.Line
-	lineRelay    *gpiocdev.Line
-	lineBuzzer   *gpiocdev.Line
-	lineLedRed   *gpiocdev.Line
-	lineLedGreen *gpiocdev.Line
-
+	Cfg           HardwareProfile
 	OutputChannel chan string
+	bitBuffer     string
+	lastBitTime   time.Time
+	isProcessing  bool
+	chip          *gpiocdev.Chip
+	d0Line        *gpiocdev.Line
+	d1Line        *gpiocdev.Line
+	relayLine     *gpiocdev.Line
+	dsmLine       *gpiocdev.Line
+	rexLine       *gpiocdev.Line
+	buzzLine      *gpiocdev.Line 
+	hornLine      *gpiocdev.Line 
+	logger        *log.Logger
+
+	// Operational State Machine Latches
+	ExpectOpen     bool
+	DoorOpenedAt   time.Time
+	DhoTriggered   bool
+	PreAlarmActive bool
+	DfoTriggered   bool
+	LockdownActive bool
+	SustainActive  bool
+
+	// Electrical Anti-Chatter Latches
+	relayMutex     sync.Mutex
+	relayCooldown  bool
+	
+	// Spattering prevention flag tracker
+	lastLoggedState string
 }
 
-func NewWiegandReader(cfg ReaderConfig) *WiegandReader {
+func NewWiegandReader(cfg HardwareProfile) *WiegandReader {
 	return &WiegandReader{
-		config:        cfg,
-		OutputChannel: make(chan string, 10),
+		Cfg:            cfg,
+		OutputChannel:  make(chan string, 10),
+		ExpectOpen:     false,
+		DfoTriggered:   false,
+		DhoTriggered:   false,
+		PreAlarmActive: false,
 	}
 }
 
-func (wr *WiegandReader) InitializeHardware() error {
+func (r *WiegandReader) SetLogger(l *log.Logger) {
+	r.logger = l
+}
+
+func (r *WiegandReader) logMessage(msg string) {
+	if r.logger != nil {
+		r.logger.Println(msg)
+	} else {
+		log.Println(msg)
+	}
+}
+
+func (r *WiegandReader) diagnosticPinError(pinName string, offset int, originalErr error) error {
+	info, _ := r.chip.LineInfo(offset)
+	return fmt.Errorf("\n--------------------------------------------------------------------------------\n"+
+		"[RESOURCE LOCKOUT ERROR]\n"+
+		"Target Subsystem Element : %s\n"+
+		"Physical Board Setting   : GPIO Offset %d\n"+
+		"Kernel Error Reason      : %v\n"+
+		"Current Active Consumer  : %s\n"+
+		"--------------------------------------------------------------------------------",
+		pinName, offset, originalErr, info.Consumer)
+}
+
+func (r *WiegandReader) InitializeHardware() error {
 	var err error
-
-	wr.chip, err = gpiocdev.NewChip(wr.config.GpioChipDevice)
+	r.chip, err = gpiocdev.NewChip(r.Cfg.Chip)
 	if err != nil {
-		return err
+		return fmt.Errorf("[BUS-FATAL] Unable to open primary character device node '%s': %w", r.Cfg.Chip, err)
 	}
 
-	wr.lineRelay, err = wr.chip.RequestLine(wr.config.LockRelayPin, gpiocdev.AsOutput(0)) // Fail-secure (0 = locked)
-	if err != nil {
-		return err
-	}
-	wr.lineBuzzer, err = wr.chip.RequestLine(wr.config.BuzzerPin, gpiocdev.AsOutput(0))
-	if err != nil {
-		return err
-	}
-	wr.lineLedGreen, err = wr.chip.RequestLine(wr.config.LedGreenPin, gpiocdev.AsOutput(0))
-	if err != nil {
-		return err
-	}
-	wr.lineLedRed, err = wr.chip.RequestLine(wr.config.LedRedPin, gpiocdev.AsOutput(1)) // 1 = Solid Red Normal posture
-	if err != nil {
-		return err
-	}
+	r.d0Line, err = r.chip.RequestLine(r.Cfg.D0, gpiocdev.WithEventHandler(func(e gpiocdev.LineEvent) { r.handleBitDrop("0") }), gpiocdev.WithFallingEdge)
+	if err != nil { return r.diagnosticPinError("D0", r.Cfg.D0, err) }
+	
+	r.d1Line, err = r.chip.RequestLine(r.Cfg.D1, gpiocdev.WithEventHandler(func(e gpiocdev.LineEvent) { r.handleBitDrop("1") }), gpiocdev.WithFallingEdge)
+	if err != nil { return r.diagnosticPinError("D1", r.Cfg.D1, err) }
 
+	r.dsmLine, err = r.chip.RequestLine(r.Cfg.Dsm, 
+		gpiocdev.WithBothEdges,
+		gpiocdev.WithDebounce(25*time.Millisecond),
+	)
+	if err != nil { return r.diagnosticPinError("DSM", r.Cfg.Dsm, err) }
+
+	r.rexLine, err = r.chip.RequestLine(r.Cfg.Rex, 
+		gpiocdev.WithFallingEdge,
+		gpiocdev.WithDebounce(25*time.Millisecond),
+		gpiocdev.WithEventHandler(func(e gpiocdev.LineEvent) {
+			r.logMessage("[REX-INTERRUPT] Request to Exit button pressed. Bypassing perimeter shunts.")
+			r.ExecuteUnlockCycle()
+		}),
+	)
+	if err != nil { return r.diagnosticPinError("REX", r.Cfg.Rex, err) }
+
+	r.relayLine, err = r.chip.RequestLine(r.Cfg.Rely, gpiocdev.AsOutput(0))
+	if err != nil { return r.diagnosticPinError("Relay", r.Cfg.Rely, err) }
+	
+	r.buzzLine, err = r.chip.RequestLine(r.Cfg.Buzz, gpiocdev.AsOutput(0))
+	if err != nil { return r.diagnosticPinError("Buzzer", r.Cfg.Buzz, err) }
+	
+	r.hornLine, err = r.chip.RequestLine(r.Cfg.AlarmHornPin, gpiocdev.AsOutput(0))
+	if err != nil { return r.diagnosticPinError("Horn", r.Cfg.AlarmHornPin, err) }
+
+	r.logMessage(fmt.Sprintf("[HARDWARE] Pin bindings locked. Input D0:%d, D1:%d DSM:%d REX:%d | NC-Logic: %t", 
+		r.Cfg.D0, r.Cfg.D1, r.Cfg.Dsm, r.Cfg.Rex, r.Cfg.DsmNormallyClosed))
 	return nil
 }
 
-func (wr *WiegandReader) StartListening(stopSignal chan struct{}) {
-	wr.lineD0, _ = wr.chip.RequestLine(wr.config.WiegandD0Pin, gpiocdev.WithEventHandler(func(evt gpiocdev.LineEvent) {
-		wr.mu.Lock()
-		wr.bitBuffer += "0"
-		wr.bitCount++
-		wr.lastBitTime = time.Now()
-		wr.isProcessing = true
-		wr.mu.Unlock()
-	}), gpiocdev.WithPullUp)
-
-	wr.lineD1, _ = wr.chip.RequestLine(wr.config.WiegandD1Pin, gpiocdev.WithEventHandler(func(evt gpiocdev.LineEvent) {
-		wr.mu.Lock()
-		wr.bitBuffer += "1"
-		wr.bitCount++
-		wr.lastBitTime = time.Now()
-		wr.isProcessing = true
-		wr.mu.Unlock()
-	}), gpiocdev.WithPullUp)
-
-	go wr.monitorTimeoutLoop(stopSignal)
+func (r *WiegandReader) IsDoorPhysicallyOpen() bool {
+	rawVal, err := r.dsmLine.Value()
+	if err != nil {
+		return false 
+	}
+	if r.Cfg.DsmNormallyClosed {
+		return rawVal == 1
+	}
+	return rawVal == 0
 }
 
-func (wr *WiegandReader) monitorTimeoutLoop(stopSignal chan struct{}) {
-	timeoutDuration := time.Duration(wr.config.TimeoutMs) * time.Millisecond
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+func (r *WiegandReader) handleBitDrop(bit string) {
+	r.bitBuffer += bit
+	r.lastBitTime = time.Now()
+	r.isProcessing = true
+}
 
-	for {
-		select {
-		case <-stopSignal:
-			if wr.lineRelay != nil { wr.lineRelay.SetValue(0) }
-			if wr.lineD0 != nil { wr.lineD0.Close() }
-			if wr.lineD1 != nil { wr.lineD1.Close() }
-			if wr.chip != nil { wr.chip.Close() }
-			return
-		case <-ticker.C:
-			wr.mu.Lock()
-			if wr.isProcessing && time.Since(wr.lastBitTime) > timeoutDuration {
-				fullBitStream := wr.bitBuffer
-				wr.bitBuffer = ""
-				wr.bitCount = 0
-				wr.isProcessing = false
-				wr.mu.Unlock()
-
-				wr.OutputChannel <- fullBitStream
-			} else {
-				wr.mu.Unlock()
+func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback func(string, string)) {
+	// Loop A: Wiegand Bitstream Packet Assembler Thread
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ticker.C:
+				if r.isProcessing && time.Since(r.lastBitTime) > time.Duration(r.Cfg.Tout)*time.Millisecond {
+					frame := r.bitBuffer
+					r.bitBuffer = ""
+					r.isProcessing = false
+					r.OutputChannel <- frame
+				}
 			}
 		}
-	}
+	}()
+
+	// Loop B: State Machine Perimeter Watcher (Dynamic DFO Bypass to DHO Fallthrough Execution)
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopChan:
+				return
+			case <-ticker.C:
+				doorIsOpen := r.IsDoorPhysicallyOpen()
+
+				if doorIsOpen {
+					if r.DoorOpenedAt.IsZero() {
+						r.DoorOpenedAt = time.Now()
+					}
+					
+					if r.lastLoggedState != "OPEN" {
+						r.logMessage(fmt.Sprintf("[DOOR] Position status changed to OPEN. Auth-Latch: %t, DFO-Enabled: %t", r.ExpectOpen, r.Cfg.DfoEnabled))
+						r.lastLoggedState = "OPEN"
+					}
+
+					// 1. DFO TRACKING LAYER
+					if !r.ExpectOpen && r.Cfg.DfoEnabled {
+						if !r.DfoTriggered {
+							r.DfoTriggered = true 
+							r.logMessage("[ALARM-CRITICAL] Door Forced Open (DFO) Detected! No authorization signal active.")
+							alarmCallback("DFO", "Perimeter door open without strike or REX signal.")
+							r.hornLine.SetValue(1)
+						}
+					}
+
+					// 2. TIMED DHO TRACKING LAYER (Runs if authorized OR if DFO is turned off)
+					if r.ExpectOpen || !r.Cfg.DfoEnabled {
+						if r.Cfg.DhoEnabled {
+							elapsedSecs := time.Since(r.DoorOpenedAt).Seconds()
+
+							// Stage A: Move into Pre-Alarm zone warning
+							if elapsedSecs >= float64(r.Cfg.DhoPreAlarmSecs) && elapsedSecs < float64(r.Cfg.DhoTimeout) {
+								if !r.PreAlarmActive && !r.DhoTriggered {
+									r.PreAlarmActive = true
+									r.logMessage(fmt.Sprintf("[WARN] Pre-Alarm threshold reached (Door open %d secs). Chirping reader buzzer.", int(elapsedSecs)))
+									alarmCallback("PRE_ALARM", fmt.Sprintf("Door open past warning window at %d seconds.", int(elapsedSecs)))
+									r.ExecuteBuzzerPulse(15)
+								}
+							}
+
+							// Stage B: Exceed master baseline timeframe -> Trigger full DHO alarm
+							if elapsedSecs >= float64(r.Cfg.DhoTimeout) {
+								if !r.DhoTriggered {
+									r.DhoTriggered = true
+									r.PreAlarmActive = false
+									r.logMessage(fmt.Sprintf("[ALARM-CRITICAL] Door Held Open (DHO) limit breached! Exceeded %d seconds.", r.Cfg.DhoTimeout))
+									alarmCallback("DHO", "Door left open beyond configured baseline parameters.")
+									r.hornLine.SetValue(1)
+								}
+							}
+						}
+					}
+				} else {
+					// DOOR IS SECURELY CLOSED: Cleanly purge metrics back to low
+					if !r.DoorOpenedAt.IsZero() || r.DfoTriggered || r.DhoTriggered || r.PreAlarmActive || r.lastLoggedState != "SECURE" {
+						r.DoorOpenedAt = time.Time{}
+						r.DhoTriggered = false
+						r.DfoTriggered = false 
+						r.PreAlarmActive = false
+						r.ExpectOpen = false
+						r.buzzLine.SetValue(0)
+						r.hornLine.SetValue(0) 
+						r.logMessage("[DOOR] Contacts met. Perimeter returned to secure latched state. All alert matrices reset.")
+						r.lastLoggedState = "SECURE"
+					}
+				}
+			}
+		}
+	}()
 }
 
-func (wr *WiegandReader) ExecuteUnlockCycle() {
-	wr.lineLedRed.SetValue(0)
-	wr.lineLedGreen.SetValue(1)
-	wr.lineBuzzer.SetValue(1)
-	wr.lineRelay.SetValue(1) // Drop barrier lock
-	time.Sleep(200 * time.Millisecond)
-	wr.lineBuzzer.SetValue(0)
-	
-	time.Sleep(3800 * time.Millisecond) // Maintain unlock window
-	wr.lineRelay.SetValue(0) // Secure strike
-	wr.lineLedGreen.SetValue(0)
-	wr.lineLedRed.SetValue(1)
+func (r *WiegandReader) ExecuteUnlockCycle() {
+	r.relayMutex.Lock()
+	if r.LockdownActive || r.relayCooldown {
+		r.relayMutex.Unlock()
+		return
+	}
+	r.relayCooldown = true 
+	r.relayMutex.Unlock()
+
+	r.ExpectOpen = true
+	r.relayLine.SetValue(1)
+	r.logMessage("[HARDWARE] Strike relay energized.")
+
+	go func() {
+		time.Sleep(4 * time.Second) 
+		r.relayMutex.Lock()
+		if !r.SustainActive {
+			r.relayLine.SetValue(0)
+			r.logMessage("[HARDWARE] Strike relay de-energized.")
+		}
+		r.relayMutex.Unlock()
+		
+		time.Sleep(1 * time.Second) 
+		r.relayMutex.Lock()
+		r.relayCooldown = false 
+		r.relayMutex.Unlock()
+	}()
 }
 
-func (wr *WiegandReader) ExecuteDenialAlert() {
-	for i := 0; i < 3; i++ {
-		wr.lineLedRed.SetValue(0)
-		wr.lineBuzzer.SetValue(1)
-		time.Sleep(150 * time.Millisecond)
-		wr.lineLedRed.SetValue(1)
-		wr.lineBuzzer.SetValue(0)
-		time.Sleep(150 * time.Millisecond)
-	}
+func (r *WiegandReader) ExecuteBuzzerPulse(pulses int) {
+	go func() {
+		for i := 0; i < pulses; i++ {
+			if !r.PreAlarmActive || r.DfoTriggered || r.DhoTriggered { return }
+			r.buzzLine.SetValue(1)
+			time.Sleep(100 * time.Millisecond)
+			r.buzzLine.SetValue(0)
+			time.Sleep(150 * time.Millisecond)
+		}
+		
+		time.Sleep(1 * time.Second)
+		if r.PreAlarmActive && !r.DhoTriggered && !r.DfoTriggered {
+			r.ExecuteBuzzerPulse(pulses)
+		}
+	}()
+}
+
+func (r *WiegandReader) CloseHardware() {
+	if r.relayLine != nil { r.relayLine.SetValue(0); r.relayLine.Close() }
+	if r.buzzLine != nil { r.buzzLine.SetValue(0); r.buzzLine.Close() }
+	if r.hornLine != nil { r.hornLine.SetValue(0); r.hornLine.Close() }
+	if r.d0Line != nil { r.d0Line.Close() }
+	if r.d1Line != nil { r.d1Line.Close() }
+	if r.dsmLine != nil { r.dsmLine.Close() }
+	if r.rexLine != nil { r.rexLine.Close() }
+	if r.chip != nil { r.chip.Close() }
 }
