@@ -3,7 +3,7 @@
 PIACS Edge is a high-performance, resilient, event-driven access control daemon written in Go. It is designed to run directly on physical edge hardware (such as a Raspberry Pi) utilizing low-level kernel character device drivers (`gpiocdev`) to interface with physical Wiegand badge readers, door status monitors (DSM), request-to-exit (REX) sensors, solid-state locking relays, and signaling matrices.
 
 ## 🏗️ Core Architecture Blueprint
-
+```
    +-------------------------------------------------------+
    |                  PIACS Security Server                |
    |                   (Central PostgreSQL)                |
@@ -27,7 +27,7 @@ PIACS Edge is a high-performance, resilient, event-driven access control daemon 
 |  |  [Reader Buzzer]  [Alarm Siren]                                |  |
 |  +----------------------------------------------------------------+  |
 +----------------------------------------------------------------------+
-
+```
 
 ### Key Engineering Features
 * **Dual-Layer Failover Isolation:** Leverages a live relational PostgreSQL connection when online. Shifts seamlessly into a localized SQLite survivability mirror if network routes drop, ensuring zero processing interruption or entry lockout.
