@@ -73,9 +73,10 @@ The edge engine evaluates its identity markers and physical pin layout configura
     "dsm_normally_closed": true
   }
 }
+```
 🗄️ Relational Database Layout (PostgreSQL Server)
 Ensure the centralized database engine exposes these explicit data schemas. Note that the system leverages strict native boolean flags and bigint parameters to support massive scaling constraints.
-
+```
 SQL
 -- 1. Node Registration Master Inventory Table
 CREATE TABLE controllers (
@@ -129,9 +130,10 @@ CREATE TABLE system_alarms (
     details TEXT,
     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+```
 📡 Administrative Network Command Interface
 The edge daemon opens a globally listening HTTP endpoint API to accept signed operational requests. All inbound operations must present a valid authentication token profile signature header (Authorization: Bearer <api_token>).
-
+```
 Endpoint Target Route
 HTTP
 POST /api/v1/controller/remote-unlock
@@ -198,7 +200,7 @@ go build -o piacs-edge main.go config.go reader.go
 sudo ./piacs-edge
 
 ---
-
+```
 ### 🛡️ Don't Forget to Verify Your Git Exclusion File!
 Since this document layout references secret tokens and raw production structural passwords inside `config.json`, make sure you have added your environment paths into your project's tracking exclusions. If your `.gitignore` isn't active yet, execute this snippet in your workspace directory:
 
@@ -206,3 +208,4 @@ Since this document layout references secret tokens and raw production structura
 echo "config.json" >> .gitignore
 echo "edge_cache.db" >> .gitignore
 echo "*.log" >> .gitignore
+```
