@@ -845,6 +845,8 @@ type HealthTelemetry struct {
 	Memory       float64 `json:"memory_usage"`
 	BufferedLogs int     `json:"buffered_logs"`
 	PingMs       int     `json:"last_ping_ms"`
+	ServerPing   int     `json:"server_ping_ms"`
+	APIStatus    string  `json:"api_status"`
 }
 
 func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
@@ -856,7 +858,8 @@ func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := dbConn.Query(`
 		SELECT controller_id, server_ip, friendly_name, is_online, 
-		       cpu_usage, memory_usage, buffered_logs, last_ping_ms 
+		       cpu_usage, memory_usage, buffered_logs, last_ping_ms,
+		       server_ping_ms, api_status
 		FROM controllers ORDER BY controller_id`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -867,7 +870,7 @@ func handleSystemHealth(w http.ResponseWriter, r *http.Request) {
 	list := []HealthTelemetry{}
 	for rows.Next() {
 		var h HealthTelemetry
-		rows.Scan(&h.ControllerID, &h.IP, &h.FriendlyName, &h.IsOnline, &h.CPU, &h.Memory, &h.BufferedLogs, &h.PingMs)
+		rows.Scan(&h.ControllerID, &h.IP, &h.FriendlyName, &h.IsOnline, &h.CPU, &h.Memory, &h.BufferedLogs, &h.PingMs, &h.ServerPing, &h.APIStatus)
 		list = append(list, h)
 	}
 	json.NewEncoder(w).Encode(list)
@@ -1221,7 +1224,7 @@ func startControllerHealthPoller() {
 				if err != nil {
 					_, dbErr := dbConn.Exec(`
 						UPDATE controllers 
-						SET is_online = false, last_ping_ms = 999, cpu_usage = 0, memory_usage = 0 
+						SET is_online = false, server_ping_ms = 999, api_status = 'OFFLINE', cpu_usage = 0, memory_usage = 0 
 						WHERE controller_id = $1`, tgt.ID)
 					if dbErr != nil {
 						log.Printf("[HEALTH-POLLER-ERR] Failed to update offline state: %v", dbErr)
@@ -1235,7 +1238,7 @@ func startControllerHealthPoller() {
 				if reqErr != nil {
 					dbConn.Exec(`
 						UPDATE controllers 
-						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						SET is_online = true, server_ping_ms = $1, api_status = 'API_ERROR', last_heartbeat = NOW() 
 						WHERE controller_id = $2`, pingMs, tgt.ID)
 					return
 				}
@@ -1245,7 +1248,7 @@ func startControllerHealthPoller() {
 				if respErr != nil {
 					dbConn.Exec(`
 						UPDATE controllers 
-						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						SET is_online = true, server_ping_ms = $1, api_status = 'API_UNREACHABLE', last_heartbeat = NOW() 
 						WHERE controller_id = $2`, pingMs, tgt.ID)
 					return
 				}
@@ -1254,7 +1257,7 @@ func startControllerHealthPoller() {
 				if resp.StatusCode != http.StatusOK {
 					dbConn.Exec(`
 						UPDATE controllers 
-						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						SET is_online = true, server_ping_ms = $1, api_status = 'API_FORBIDDEN', last_heartbeat = NOW() 
 						WHERE controller_id = $2`, pingMs, tgt.ID)
 					return
 				}
@@ -1267,14 +1270,14 @@ func startControllerHealthPoller() {
 				if decodeErr := json.NewDecoder(resp.Body).Decode(&metrics); decodeErr != nil {
 					dbConn.Exec(`
 						UPDATE controllers 
-						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						SET is_online = true, server_ping_ms = $1, api_status = 'API_DECODE_ERROR', last_heartbeat = NOW() 
 						WHERE controller_id = $2`, pingMs, tgt.ID)
 					return
 				}
 
 				_, dbErr := dbConn.Exec(`
 					UPDATE controllers 
-					SET is_online = true, last_ping_ms = $1, cpu_usage = $2, memory_usage = $3, 
+					SET is_online = true, server_ping_ms = $1, api_status = 'HEALTHY', cpu_usage = $2, memory_usage = $3, 
 					    buffered_logs = $4, last_heartbeat = NOW() 
 					WHERE controller_id = $5`, 
 					pingMs, metrics.CPUUsage, metrics.MemoryUsage, metrics.BufferedLogs, tgt.ID)

@@ -1103,6 +1103,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const cpuWarnClass = h.cpu_usage > 80 ? 'critical' : (h.cpu_usage > 50 ? 'warning' : '');
             const memWarnClass = h.memory_usage > 85 ? 'critical' : (h.memory_usage > 60 ? 'warning' : '');
 
+            let apiStatusClass = 'offline';
+            if (h.api_status === 'HEALTHY') {
+                apiStatusClass = 'secure';
+            } else if (h.api_status.startsWith('API_') || h.api_status === 'UNKNOWN') {
+                apiStatusClass = 'warning';
+            }
+
             card.innerHTML = `
                 <div class="health-card-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 1rem;">
                     <div>
@@ -1132,14 +1139,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
 
-                <div class="health-metrics-grid">
+                <div class="health-metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 1rem; margin-top: 1rem;">
                     <div>
-                        <div class="health-metric-label">Local SQLite Queue</div>
-                        <div class="health-metric-val">${h.buffered_logs}</div>
+                        <div class="health-metric-label" style="font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;">API Check</div>
+                        <div class="health-metric-val" style="margin-top: 0.2rem;"><span class="status-badge ${apiStatusClass}" style="font-size: 0.75rem; font-weight: bold; padding: 0.2rem 0.5rem; display: inline-block;">${h.api_status}</span></div>
                     </div>
                     <div>
-                        <div class="health-metric-label">DB Ping Latency</div>
-                        <div class="health-metric-val">${h.last_ping_ms} ms</div>
+                        <div class="health-metric-label" style="font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;">Local SQLite Queue</div>
+                        <div class="health-metric-val" style="font-size: 1.1rem; font-weight: bold; color: #fff;">${h.buffered_logs}</div>
+                    </div>
+                    <div>
+                        <div class="health-metric-label" style="font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;">Ping (Server ➔ Node)</div>
+                        <div class="health-metric-val" style="font-size: 1.1rem; font-weight: bold; color: #fff;">${h.server_ping_ms} ms</div>
+                    </div>
+                    <div>
+                        <div class="health-metric-label" style="font-size: 0.75rem; color: #888; margin-bottom: 0.2rem;">Ping (Node ➔ DB)</div>
+                        <div class="health-metric-val" style="font-size: 1.1rem; font-weight: bold; color: #fff;">${h.last_ping_ms} ms</div>
                     </div>
                 </div>
             `;
