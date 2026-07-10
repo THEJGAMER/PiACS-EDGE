@@ -20,9 +20,7 @@
                 <a href="#map" class="menu-item" id="btn-map">Portal Map</a>
                 <a href="#threat" class="menu-item" id="btn-threat">Threat Postures</a>
                 <a href="#health" class="menu-item" id="btn-health">System Health</a>
-                <a href="#schedules" class="menu-item" id="btn-schedules">Schedules & Holidays</a>
-                <a href="#access" class="menu-item" id="btn-access">Access Levels</a>
-                <a href="#credentials" class="menu-item" id="btn-credentials">Credentials (Badges)</a>
+                <a href="#accesshub" class="menu-item" id="btn-accesshub">🔑 Access Control Hub</a>
                 <a href="#syslogs" class="menu-item" id="btn-syslogs">System Logs</a>
                 <a href="#config" class="menu-item" id="btn-config">🔧 Controller Config</a>
             </nav>
@@ -96,182 +94,43 @@
                 </div>
             </section>
 
-            <!-- Schedules & Holidays View -->
-            <section id="view-schedules" class="view-panel">
-                <div class="grid-2col">
-                    <div class="card glass">
-                        <h3>Access Schedules & Time Zones</h3>
-                        <form id="form-timezone" class="form-container">
-                            <div class="form-group">
-                                <label for="tz-name">Time Zone Name</label>
-                                <input type="text" id="tz-name" required placeholder="e.g. Normal Business Hours">
-                            </div>
-                            <div class="form-group">
-                                <label>Intervals Configuration</label>
-                                <div id="tz-intervals-container">
-                                    <div class="interval-row">
-                                        <select class="sel-day">
-                                            <option value="1">Monday</option>
-                                            <option value="2">Tuesday</option>
-                                            <option value="3">Wednesday</option>
-                                            <option value="4">Thursday</option>
-                                            <option value="5">Friday</option>
-                                            <option value="6">Saturday</option>
-                                            <option value="0">Sunday</option>
-                                            <option value="7">Holiday Only</option>
-                                        </select>
-                                        <input type="time" class="time-start" value="08:00">
-                                        <input type="time" class="time-end" value="17:00">
-                                    </div>
-                                </div>
-                                <button type="button" class="btn-secondary" id="btn-add-interval">+ Add Day Interval</button>
-                            </div>
-                            <button type="submit" class="btn btn-submit">Save Time Zone</button>
-                        </form>
-
-                        <div class="list-container mt-2">
-                            <h4>Active Time Zones</h4>
-                            <table class="data-table" id="table-timezones">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Name</th>
-                                        <th>Configured Days & Windows</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="card glass">
-                        <h3>Holidays Calendar</h3>
-                        <form id="form-holiday" class="form-container">
-                            <div class="form-group">
-                                <label for="hol-date">Holiday Date</label>
-                                <input type="date" id="hol-date" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="hol-name">Holiday Description</label>
-                                <input type="text" id="hol-name" required placeholder="e.g. Christmas Day">
-                            </div>
-                            <button type="submit" class="btn btn-submit">Register Holiday Date</button>
-                        </form>
-
-                        <div class="list-container mt-2">
-                            <h4>Registered Holidays</h4>
-                            <table class="data-table" id="table-holidays">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Holiday Label</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                    </div>
+            <!-- Access Control Hub View -->
+            <section id="view-accesshub" class="view-panel">
+                <div class="sub-tabs-nav" style="display: flex; gap: 0.5rem; border-bottom: 2px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 1.5rem;">
+                    <button class="sub-tab-item active" data-subtab="subtab-credentials">👤 Badge Credentials</button>
+                    <button class="sub-tab-item" data-subtab="subtab-accesslevels">🛡️ Access Levels</button>
+                    <button class="sub-tab-item" data-subtab="subtab-schedules">📅 Schedules & Time Zones</button>
+                    <button class="sub-tab-item" data-subtab="subtab-holidays">🏖️ Holidays Calendar</button>
                 </div>
-            </section>
 
-            <!-- Access Levels View -->
-            <section id="view-access" class="view-panel">
-                <div class="card glass">
-                    <h3>Access Levels Management</h3>
-                    <div class="grid-2col">
-                        <form id="form-access-level" class="form-container">
-                            <div class="form-group">
-                                <label for="al-name">Access Level Name</label>
-                                <input type="text" id="al-name" required placeholder="e.g. IT Staff 24/7">
+                <!-- Sub-tab contents -->
+                <div id="subtab-credentials" class="sub-tab-content active">
+                    <div class="card glass">
+                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                            <div>
+                                <h3>Badge Credentials & Employee Mapping</h3>
+                                <p class="subtitle">Search, filter, and manage secure identity badges and cardholder records.</p>
                             </div>
-                            <div class="form-group">
-                                <label for="al-reader">Target Controller/Reader</label>
-                                <select id="al-reader" required>
-                                    <!-- Loaded dynamically -->
-                                </select>
+                            <button class="btn btn-submit" id="btn-add-cardholder" style="padding: 0.5rem 1rem;">➕ Add Cardholder</button>
+                        </div>
+
+                        <!-- Search and Filter Bar -->
+                        <div class="filter-bar" style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                            <input type="text" id="search-cardholder" placeholder="🔍 Search by name or Card ID..." style="flex: 1; min-width: 250px; padding: 0.5rem 1rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                            <div class="filter-status-group" style="display: flex; gap: 0.25rem;">
+                                <button class="btn btn-secondary active filter-status-btn" data-status="ALL">All</button>
+                                <button class="btn btn-secondary filter-status-btn" data-status="ACTIVE">Active</button>
+                                <button class="btn btn-secondary filter-status-btn" data-status="EXPIRED">Expired</button>
+                                <button class="btn btn-secondary filter-status-btn" data-status="INACTIVE">Inactive</button>
                             </div>
-                            <div class="form-group">
-                                <label for="al-timezone">Associated Time Zone</label>
-                                <select id="al-timezone" required></select>
-                            </div>
-                            <button type="submit" class="btn btn-submit">Create Access Level</button>
-                        </form>
+                        </div>
 
                         <div class="list-container">
-                            <h4>Configured Access Levels</h4>
-                            <table class="data-table" id="table-access-levels">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>Access Level</th>
-                                        <th>Reader</th>
-                                        <th>Time Zone</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Credentials View -->
-            <section id="view-credentials" class="view-panel">
-                <div class="card glass">
-                    <h3>Badge Credentials & Employee Mapping</h3>
-                    <div class="grid-2col">
-                        <form id="form-credential" class="form-container">
-                            <input type="hidden" id="cred-user-id" value="">
-                            <input type="hidden" id="cred-id" value="">
-                            <div class="form-group">
-                                <label for="cred-name">Employee Full Name</label>
-                                <input type="text" id="cred-name" required placeholder="e.g. Sarah Jenkins">
-                            </div>
-                            <div class="form-group">
-                                <label for="cred-fc">Facility Code</label>
-                                <input type="number" id="cred-fc" required placeholder="3242" min="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="cred-cid">Card ID (Badge Number)</label>
-                                <input type="number" id="cred-cid" required placeholder="669653" min="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="cred-bits">Wiegand Bit Length</label>
-                                <input type="number" id="cred-bits" value="35" required min="26" max="64">
-                            </div>
-                            <div class="form-group">
-                                <label for="cred-pin">Keypad PIN Code (Optional)</label>
-                                <input type="password" id="cred-pin" placeholder="e.g. 1234" maxlength="8">
-                            </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                <div class="form-group">
-                                    <label for="cred-start-date">Activation Date</label>
-                                    <input type="date" id="cred-start-date" required>
-                                </div>
-                                <div class="form-group">
-                                    <label for="cred-end-date">Expiration Date</label>
-                                    <input type="date" id="cred-end-date" required>
-                                </div>
-                            </div>
-                            <div class="form-group checkbox-group">
-                                <input type="checkbox" id="cred-active" checked>
-                                <label for="cred-active">Credential Active Status</label>
-                            </div>
-                            <div class="form-group">
-                                <label>Assign Access Levels</label>
-                                <div id="cred-access-levels-container" class="checkbox-list">
-                                    <!-- Populated dynamically -->
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-submit" id="btn-save-badge">Register Badge Credential</button>
-                        </form>
-
-                        <div class="list-container">
-                            <h4>Registered Badges</h4>
                             <table class="data-table" id="table-credentials">
                                 <thead>
                                     <tr>
                                         <th>Employee</th>
+                                        <th>Card Format</th>
                                         <th>FC/CardID</th>
                                         <th>Active Range</th>
                                         <th>Status</th>
@@ -281,6 +140,207 @@
                                 <tbody></tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+
+                <div id="subtab-accesslevels" class="sub-tab-content">
+                    <div class="card glass">
+                        <h3>Access Levels Management</h3>
+                        <p class="subtitle" style="margin-bottom: 1.5rem;">Map readers/doors to schedule windows to define entry privileges.</p>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 2rem;">
+                            <form id="form-access-level" class="form-container" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 8px; max-width: 500px;">
+                                <div class="form-group">
+                                    <label for="al-name">Access Level Name</label>
+                                    <input type="text" id="al-name" required placeholder="e.g. IT Staff 24/7">
+                                </div>
+                                <div class="form-group">
+                                    <label for="al-reader">Target Reader/Door</label>
+                                    <select id="al-reader" required>
+                                        <!-- Loaded dynamically -->
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="al-timezone">Associated Time Zone</label>
+                                    <select id="al-timezone" required></select>
+                                </div>
+                                <button type="submit" class="btn btn-submit" style="align-self: flex-start; padding: 0.6rem 1.5rem;">Create Access Level</button>
+                            </form>
+
+                            <div class="list-container" style="max-height: none;">
+                                <h4>Configured Access Levels</h4>
+                                <table class="data-table" id="table-access-levels">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Access Level</th>
+                                            <th>Reader</th>
+                                            <th>Time Zone</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="subtab-schedules" class="sub-tab-content">
+                    <div class="card glass">
+                        <h3>Access Schedules & Time Zones</h3>
+                        <p class="subtitle" style="margin-bottom: 1.5rem;">Define operational time windows for weekdays and weekend exceptions.</p>
+
+                        <div style="display: flex; flex-direction: column; gap: 2rem;">
+                            <form id="form-timezone" class="form-container" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 8px; max-width: 600px;">
+                                <div class="form-group">
+                                    <label for="tz-name">Time Zone Name</label>
+                                    <input type="text" id="tz-name" required placeholder="e.g. Normal Business Hours">
+                                </div>
+                                <div class="form-group">
+                                    <label>Intervals Configuration</label>
+                                    <div id="tz-intervals-container">
+                                        <div class="interval-row">
+                                            <select class="sel-day">
+                                                <option value="1">Monday</option>
+                                                <option value="2">Tuesday</option>
+                                                <option value="3">Wednesday</option>
+                                                <option value="4">Thursday</option>
+                                                <option value="5">Friday</option>
+                                                <option value="6">Saturday</option>
+                                                <option value="0">Sunday</option>
+                                                <option value="7">Holiday Only</option>
+                                            </select>
+                                            <input type="time" class="time-start" value="08:00">
+                                            <input type="time" class="time-end" value="17:00">
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn btn-secondary mt-1" id="btn-add-interval" style="padding: 0.5rem 1rem;">+ Add Day Interval</button>
+                                </div>
+                                <button type="submit" class="btn btn-submit" style="align-self: flex-start; padding: 0.6rem 1.5rem;">Save Time Zone</button>
+                            </form>
+
+                            <div class="list-container" style="max-height: none;">
+                                <h4>Active Schedules</h4>
+                                <table class="data-table" id="table-timezones">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Name</th>
+                                            <th style="min-width: 300px;">Weekly Active Timeline</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="subtab-holidays" class="sub-tab-content">
+                    <div class="card glass">
+                        <h3>Holidays Calendar</h3>
+                        <p class="subtitle" style="margin-bottom: 1.5rem;">Register corporate or public holiday closures to override regular business schedules.</p>
+
+                        <div style="display: flex; flex-direction: column; gap: 2rem;">
+                            <form id="form-holiday" class="form-container" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 8px; max-width: 500px;">
+                                <div class="form-group">
+                                    <label for="hol-date">Holiday Date</label>
+                                    <input type="date" id="hol-date" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="hol-name">Holiday Description</label>
+                                    <input type="text" id="hol-name" required placeholder="e.g. Christmas Day">
+                                </div>
+                                <button type="submit" class="btn btn-submit" style="align-self: flex-start; padding: 0.6rem 1.5rem;">Register Holiday Date</button>
+                            </form>
+
+                            <div class="list-container" style="max-height: none;">
+                                <h4>Registered Holidays</h4>
+                                <table class="data-table" id="table-holidays">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Holiday Label</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Side-Drawer for Cardholder Profile Details -->
+                <div id="cardholder-drawer" class="side-drawer">
+                    <div class="drawer-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                        <h4 style="margin: 0; color: #fff;">👤 Cardholder Profile Properties</h4>
+                        <button class="btn-close-drawer" id="btn-close-cardholder-drawer" type="button" style="background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; line-height: 1;">×</button>
+                    </div>
+                    <div class="drawer-body" style="height: calc(100% - 70px); overflow-y: auto; padding-right: 0.5rem;">
+                        <form id="form-credential" class="form-container">
+                            <input type="hidden" id="cred-user-id" value="">
+                            <input type="hidden" id="cred-id" value="">
+                            
+                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-blue);">👤 Personal Identity</h5>
+                                <div class="form-group">
+                                    <label for="cred-name">Employee Full Name</label>
+                                    <input type="text" id="cred-name" required placeholder="e.g. Sarah Jenkins">
+                                </div>
+                            </div>
+
+                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-green);">💳 Badge Credentials</h5>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                    <div class="form-group">
+                                        <label for="cred-fc">Facility Code</label>
+                                        <input type="number" id="cred-fc" required placeholder="3242" min="0">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cred-cid">Card ID (Badge)</label>
+                                        <input type="number" id="cred-cid" required placeholder="669653" min="0">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cred-bits">Wiegand Bit Length</label>
+                                    <input type="number" id="cred-bits" value="35" required min="26" max="64">
+                                </div>
+                                <div class="form-group">
+                                    <label for="cred-pin">Keypad PIN Code (Optional)</label>
+                                    <input type="password" id="cred-pin" placeholder="e.g. 1234" maxlength="8">
+                                </div>
+                            </div>
+
+                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-amber);">🗓️ Expiration & Validity</h5>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                    <div class="form-group">
+                                        <label for="cred-start-date">Activation</label>
+                                        <input type="date" id="cred-start-date" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cred-end-date">Expiration</label>
+                                        <input type="date" id="cred-end-date" required>
+                                    </div>
+                                </div>
+                                <div class="form-group checkbox-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
+                                    <input type="checkbox" id="cred-active" checked style="width: auto;">
+                                    <label for="cred-active" style="margin: 0; cursor: pointer;">Credential Active Status</label>
+                                </div>
+                            </div>
+
+                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-red);">🛡️ Access Level Mapping</h5>
+                                <div id="cred-access-levels-container" class="checkbox-list" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color); padding: 0.5rem; border-radius: 4px; background: rgba(0,0,0,0.2);">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+
+                            <div class="drawer-footer" style="display: flex; gap: 0.5rem; margin-top: 1.5rem; padding-bottom: 1rem;">
+                                <button type="button" class="btn btn-secondary" id="btn-cancel-badge" style="flex: 1;">Cancel</button>
+                                <button type="submit" class="btn btn-submit" id="btn-save-badge" style="flex: 2;">Save Cardholder</button>
+                            </div>
+                        </form>
                     </div>
                 </div>
             </section>

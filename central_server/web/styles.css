@@ -667,6 +667,7 @@ body {
     padding: 12px;
     text-align: left;
     border-bottom: 1px solid var(--card-border);
+    vertical-align: top;
 }
 
 .data-table th {
@@ -1021,6 +1022,141 @@ body {
 .health-metric-label {
     font-size: 0.75rem;
     color: #aaa;
+}
+
+/* Sub-Tabs Navigation */
+.sub-tabs-nav {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.sub-tab-item {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.6rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.sub-tab-item:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.sub-tab-item.active {
+    color: var(--accent-color);
+    background: rgba(59, 130, 246, 0.1);
+    border-bottom: 2px solid var(--accent-color);
+    border-radius: 6px 6px 0 0;
+}
+
+.sub-tab-content {
+    display: none;
+}
+
+.sub-tab-content.active {
+    display: block;
+    animation: fade-in 0.3s ease;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Side-Drawer Layout (LenelS2 OnGuard Style) */
+.side-drawer {
+    position: fixed;
+    top: 0;
+    right: -450px;
+    width: 450px;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 2rem 1.5rem;
+    box-sizing: border-box;
+}
+
+.side-drawer.drawer-open {
+    right: 0;
+}
+
+.drawer-section h5 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0;
+    margin-bottom: 0.75rem;
+}
+
+/* Initials Avatar Badge */
+.avatar-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.8rem;
+    color: #fff;
+    text-transform: uppercase;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Visual 24h Timeline bar for Timezones */
+.timeline-bar-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.timeline-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.timeline-day-label {
+    width: 65px;
+    font-size: 0.75rem;
+    color: #888;
+    text-align: right;
+}
+
+.timeline-bar-visual {
+    flex-grow: 1;
+    min-width: 200px;
+    height: 12px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+}
+
+.timeline-bar-active-segment {
+    position: absolute;
+    height: 100%;
+    background: #3b82f6;
+    box-shadow: 0 0 6px rgba(59, 130, 246, 0.8);
+    border-radius: 2px;
 }
 
 

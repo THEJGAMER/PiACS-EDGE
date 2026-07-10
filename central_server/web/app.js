@@ -28,7 +28,86 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (item.id === 'btn-health') {
                 loadSystemHealth();
                 healthPollInterval = setInterval(loadSystemHealth, 5000);
+            } else if (item.id === 'btn-accesshub') {
+                loadSchedules();
+                loadHolidays();
+                loadAccessLevels();
+                loadCredentials();
             }
+        });
+    });
+
+    // Sub-tab toggles in Access Control Hub
+    const subTabItems = document.querySelectorAll('.sub-tab-item');
+    const subTabContents = document.querySelectorAll('.sub-tab-content');
+
+    subTabItems.forEach(btn => {
+        btn.addEventListener('click', () => {
+            subTabItems.forEach(item => item.classList.remove('active'));
+            subTabContents.forEach(content => content.classList.remove('active'));
+
+            btn.classList.add('active');
+            const targetSubtab = btn.getAttribute('data-subtab');
+            document.getElementById(targetSubtab).classList.add('active');
+        });
+    });
+
+    // Side-Drawer actions for Cardholder
+    const drawer = document.getElementById('cardholder-drawer');
+    const closeDrawerBtn = document.getElementById('btn-close-cardholder-drawer');
+    const cancelBadgeBtn = document.getElementById('btn-cancel-badge');
+    const addCardholderBtn = document.getElementById('btn-add-cardholder');
+
+    function openDrawer(isEdit = false) {
+        drawer.classList.add('drawer-open');
+        if (!isEdit) {
+            document.getElementById('form-credential').reset();
+            document.getElementById('cred-id').value = '';
+            document.getElementById('cred-user-id').value = '';
+            document.getElementById('btn-save-badge').innerText = 'Register Badge Credential';
+            
+            // Set default validity dates
+            const todayStr = new Date().toISOString().split('T')[0];
+            document.getElementById('cred-start-date').value = todayStr;
+            const nextYear = new Date();
+            nextYear.setFullYear(nextYear.getFullYear() + 1);
+            document.getElementById('cred-end-date').value = nextYear.toISOString().split('T')[0];
+
+            // Uncheck all access levels
+            document.querySelectorAll('input[name="cred-al"]').forEach(cb => cb.checked = false);
+        }
+    }
+
+    function closeDrawer() {
+        drawer.classList.remove('drawer-open');
+    }
+
+    if (addCardholderBtn) {
+        addCardholderBtn.addEventListener('click', () => openDrawer(false));
+    }
+    if (closeDrawerBtn) {
+        closeDrawerBtn.addEventListener('click', closeDrawer);
+    }
+    if (cancelBadgeBtn) {
+        cancelBadgeBtn.addEventListener('click', closeDrawer);
+    }
+
+    // Search and status filters for Cardholders
+    const searchCardholderInput = document.getElementById('search-cardholder');
+    if (searchCardholderInput) {
+        searchCardholderInput.addEventListener('input', (e) => {
+            currentFilterSearch = e.target.value.toLowerCase();
+            renderCredentials();
+        });
+    }
+
+    const filterStatusButtons = document.querySelectorAll('.filter-status-btn');
+    filterStatusButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterStatusButtons.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentFilterStatus = btn.getAttribute('data-status');
+            renderCredentials();
         });
     });
 
@@ -60,6 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let controllersMap = {}; // controller_id -> state details
     let healthPollInterval = null;
     let eventsCache = [];    // Cached logs for filtering and CSV export
+    let credentialsCache = [];
+    let currentFilterStatus = 'ALL';
+    let currentFilterSearch = '';
 
     // Load Initial Data
     loadControllers();
@@ -537,13 +619,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
         data.forEach(tz => {
             const tr = document.createElement('tr');
+            
+            // Build the visual 24h weekly timeline
+            let timelineHtml = '<div class="timeline-bar-container">';
             const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Holiday'];
-            const daysConfigured = tz.intervals.map(iv => `${dayNames[iv.day_of_week]}: ${iv.start_time}-${iv.end_time}`).join(', ');
+            
+            for (let dayIdx = 0; dayIdx < 8; dayIdx++) {
+                const dayIntervals = tz.intervals.filter(iv => iv.day_of_week === dayIdx);
+                
+                timelineHtml += `
+                    <div class="timeline-bar-row">
+                        <span class="timeline-day-label">${dayNames[dayIdx]}</span>
+                        <div class="timeline-bar-visual">
+                `;
+                
+                dayIntervals.forEach(iv => {
+                    const startParts = iv.start_time.split(':');
+                    const endParts = iv.end_time.split(':');
+                    const startMin = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+                    const endMin = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+                    
+                    const leftPct = (startMin / 1440) * 100;
+                    const widthPct = ((endMin - startMin) / 1440) * 100;
+                    
+                    timelineHtml += `
+                        <div class="timeline-bar-active-segment" style="left: ${leftPct}%; width: ${widthPct}%;" title="${iv.start_time.slice(0, 5)} - ${iv.end_time.slice(0, 5)}"></div>
+                    `;
+                });
+                
+                timelineHtml += `
+                        </div>
+                    </div>
+                `;
+            }
+            timelineHtml += '</div>';
 
             tr.innerHTML = `
                 <td>${tz.id}</td>
-                <td>${tz.name}</td>
-                <td>${daysConfigured || 'None'}</td>
+                <td style="font-weight: bold; color: #fff; vertical-align: top; min-width: 150px;">${tz.name}</td>
+                <td style="min-width: 300px;">${timelineHtml}</td>
             `;
             tbody.appendChild(tr);
 
@@ -677,25 +791,95 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadCredentials() {
         const res = await fetch('/api/credentials');
         const data = await res.json();
+        credentialsCache = data;
+        renderCredentials();
+    }
+
+    function renderCredentials() {
         const tbody = document.querySelector('#table-credentials tbody');
         tbody.innerHTML = '';
-        data.forEach(c => {
+
+        const now = new Date();
+
+        const filtered = credentialsCache.filter(c => {
+            const matchesSearch = c.employee_name.toLowerCase().includes(currentFilterSearch) || 
+                                  String(c.card_id).includes(currentFilterSearch) ||
+                                  String(c.user_id).includes(currentFilterSearch);
+            
+            if (!matchesSearch) return false;
+
+            const expDate = new Date(c.expiration_date);
+            const actDate = new Date(c.activation_date);
+            const isExpired = expDate < now;
+            const isPending = actDate > now;
+
+            if (currentFilterStatus === 'ACTIVE') {
+                return c.is_active && !isExpired && !isPending;
+            } else if (currentFilterStatus === 'EXPIRED') {
+                return isExpired;
+            } else if (currentFilterStatus === 'INACTIVE') {
+                return !c.is_active || isPending;
+            }
+
+            return true;
+        });
+
+        filtered.forEach(c => {
             const tr = document.createElement('tr');
+
+            const expDate = new Date(c.expiration_date);
+            const actDate = new Date(c.activation_date);
+            const isExpired = expDate < now;
+            const isPending = actDate > now;
+            let statusText = 'ACTIVE';
+            let statusClass = 'secure';
+
+            if (isExpired) {
+                statusText = 'EXPIRED';
+                statusClass = 'alarm';
+            } else if (!c.is_active) {
+                statusText = 'SUSPENDED';
+                statusClass = 'alarm';
+            } else if (isPending) {
+                statusText = 'PENDING';
+                statusClass = 'warning';
+            }
+
+            // Generate avatar initials and random background color
+            const initials = c.employee_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+            const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
+            let sumChar = 0;
+            for (let i = 0; i < c.employee_name.length; i++) sumChar += c.employee_name.charCodeAt(i);
+            const avatarBg = colors[sumChar % colors.length];
+
             tr.innerHTML = `
                 <td>
-                    <div style="font-weight: bold;">${c.employee_name}</div>
-                    <div style="font-size: 0.75rem; color: #888;">User ID: ${c.user_id} | ID: ${c.id}</div>
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <div class="avatar-circle" style="background: ${avatarBg}; flex-shrink: 0;">${initials}</div>
+                        <div>
+                            <div style="font-weight: bold; color: #fff;">${c.employee_name}</div>
+                            <div style="font-size: 0.75rem; color: #888;">User ID: ${c.user_id}</div>
+                        </div>
+                    </div>
                 </td>
-                <td>${c.card_id} <span style="font-size: 0.75rem; color: #666;">(FC:${c.facility_code}, ${c.bit_length}b)</span></td>
-                <td>${formatDateOnly(c.activation_date)} - ${formatDateOnly(c.expiration_date)}</td>
-                <td><span class="status-badge ${c.is_active ? 'secure' : 'alarm'}">${c.is_active ? 'ACTIVE' : 'INACTIVE'}</span></td>
+                <td style="font-family: monospace;">Wiegand ${c.bit_length}b</td>
                 <td>
-                    <button class="btn btn-secondary btn-edit-cred" data-id="${c.id}" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; margin-right: 0.2rem;">✏️ Edit</button>
-                    <button class="btn btn-clear btn-delete-cred" data-id="${c.id}" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">🗑️ Del</button>
+                    <div style="font-weight: 500; color: #fff;">${c.card_id}</div>
+                    <div style="font-size: 0.75rem; color: #888;">FC: ${c.facility_code}</div>
+                </td>
+                <td style="font-size: 0.8rem;">
+                    <div>Act: ${formatDateOnly(c.activation_date)}</div>
+                    <div style="color: #888;">Exp: ${formatDateOnly(c.expiration_date)}</div>
+                </td>
+                <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                <td>
+                    <div style="display: flex; gap: 0.3rem;">
+                        <button class="btn btn-secondary btn-edit-cred" data-id="${c.id}" style="padding: 0.3rem 0.6rem; font-size: 0.75rem; border: 1px solid var(--border-color);">✏️ Edit</button>
+                        <button class="btn btn-clear btn-delete-cred" data-id="${c.id}" style="padding: 0.3rem 0.6rem; font-size: 0.75rem;">🗑️ Delete</button>
+                    </div>
                 </td>
             `;
 
-            // Bind edit button
             tr.querySelector('.btn-edit-cred').addEventListener('click', () => {
                 document.getElementById('cred-id').value = c.id;
                 document.getElementById('cred-user-id').value = c.user_id;
@@ -708,15 +892,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('cred-end-date').value = c.expiration_date;
                 document.getElementById('cred-active').checked = c.is_active;
 
-                // Check assigned access levels
                 document.querySelectorAll('input[name="cred-al"]').forEach(cb => {
                     cb.checked = c.access_levels ? c.access_levels.includes(parseInt(cb.value)) : false;
                 });
                 
-                document.getElementById('btn-save-badge').innerText = 'Update Badge Credential';
+                document.getElementById('btn-save-badge').innerText = 'Update Cardholder';
+                openDrawer(true);
             });
 
-            // Bind delete button
             tr.querySelector('.btn-delete-cred').addEventListener('click', async () => {
                 if (confirm(`Are you sure you want to delete ${c.employee_name}'s badge?`)) {
                     const delRes = await fetch(`/api/credentials?id=${c.id}`, { method: 'DELETE' });
@@ -784,6 +967,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cred-user-id').value = '';
             document.getElementById('btn-save-badge').innerText = 'Register Badge Credential';
             loadCredentials();
+            closeDrawer();
         }
     }
 
