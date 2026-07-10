@@ -1,131 +1,129 @@
-PiACS-EDGE: Physical Access Control System Edge EnginePiACS-EDGE is a high-performance, ultra-detailed access control engine written in Go. Engineered for distributed security architecture, it functions as an autonomous edge controller interfacing directly with physical hardware peripherals (Wiegand card readers, door status monitors, request-to-exit buttons, strike relays, and alarm horns) via the Linux gpio2 character device interface (gpiocdev).Featuring local SQLite survivability database mirrors, it guarantees uninterrupted fallback authentication during network isolation while transparently maintaining upstream tracking and configuration replication to a central PostgreSQL cluster.Architecture Overview
-```
-                        +----------------------------+
-                        |  Central PostgreSQL Cluster|
-                        +----------------------------+
-                                      ^
-                                      | Heartbeat / Sync / Audit Logs
-                                      v
-                        +----------------------------+
-                        |     PiACS-EDGE Engine      |
-                        +----------------------------+
-                          /         |            \
-                         /          |             \
-                        v           v              v
-         +-----------------+  +------------+  +-------------------+
-         | Local SQLite DB |  | REST API   |  | Linux GPIO Chardev|
-         | (Failover Cache)|  | Control V1 |  | (warthog618/gpio) |
-         +-----------------+  +------------+  +-------------------+
-                                                /   |    |    |   \
-                                               v    v    v    v    v
-                                              D0   D1  DSM  REX  Relay/Horn
-```
-Core Operational Mechanics1. Dual-Loop State Machine Perimeter WatcherThe core architecture decouples high-speed hardware interrupts from state monitoring using isolated asynchronous Go routines:Wiegand Bitstream Assembler (Loop A): Microsecond-level falling-edge event handlers sample incoming $D0$ and $D1$ lines. Collected bitstreams are automatically framed and dispatched via a buffered channel using a sliding window packet assembler driven by a configurable milliseconds timeout.Perimeter Status Tracker (Loop B): Monitors the Door Status Monitor (DSM) lines. It evaluates real-time telemetry to implement complex alarm scenarios:Door Forced Open (DFO): Fires immediately if a physical door breach occurs without a prior valid authorization strike or Request-To-Exit (REX) assertion.Door Held Open (DHO): Handles a staged timed alert sequence. If an authorized door remains open past dho_pre_alarm_secs, it begins pulsing local reader buzzers. If it remains open past dho_timeout_secs, it transitions into a critical alarm state, asserting physical alarm sirens.2. High Survivability Network Failover MirrorThe engine prioritizes perimeter uptime. During standard operation, credential validation uses a relational database pattern targeting a remote PostgreSQL infrastructure.If a database connection or network failure is detected, the engine enters a degraded offline mode. It seamlessly transfers localized authorization lookups to an internal SQLite mirror file database (edge_cache.db). A background synchronization routine executes continuous network health checks, automatically restoring parameters and pushing backlogged local transaction audits back to the main PostgreSQL cluster once connection status stabilizes.3. Comprehensive Anti-Passback (APB) EnforcementThe platform contains state-tracking state tables that log previous user regions. If a badge is scanned within an area where the badge holder is already physically tracked, the engine issues an APB_VIOLATION. In ApbStrict mode, the controller locks out access, protecting the perimeter against systemic badge-sharing breaches.4. Resilient Hardware Signal ManagementAnti-Chatter Electrical Latches: Lockout cycles rely on Mutex structures and active cooldown timers to avoid hardware damage caused by rapid relay re-activation or mechanical contact bounce.Debounced Sensor Lines: Input signals on critical sensory pins (DSM and REX) use hardware-level or kernel-space 25ms debounce constraints to ensure clean state machine transitions.Pinout Mapping & Hardware ConfigurationThe system loads its entire configuration topology from a localized config.json payload structure.config.json Schema Reference
-JSON
-```
-{
-  "controller_id": "CONTROLLER-HQ-01",
-  "api_token": "super-secure-bearer-token-here",
-  "backend_port": 8080,
-  "database_config": {
-    "db_host": "10.0.0.5",
-    "db_port": 5432,
-    "db_user": "piacs_edge_node",
-    "db_password": "securepassword",
-    "db_name": "piacs_access_db",
-    "ssl_mode": "require"
-  },
-  "hardware_mapping": {
-    "gpio_chip_device": "/dev/gpiochip4",
-    "wiegand_d0_pin": 4,
-    "wiegand_d1_pin": 5,
-    "lock_relay_pin": 12,
-    "reader_red_led_pin": 13,
-    "reader_green_led_pin": 14,
-    "reader_buzzer_pin": 15,
-    "dsm_pin": 22,
-    "rex_pin": 23,
-    "wiegand_timeout_ms": 50,
-    "dho_timeout_secs": 30,
-    "apb_strict": true,
-    "dfo_enabled": true,
-    "dho_enabled": true,
-    "dho_pre_alarm_secs": 15,
-    "alarm_horn_pin": 26,
-    "dsm_normally_closed": true
-  }
-}
-```
-Network API API Interface (v1)The application mounts a secure HTTP REST gateway to provide dynamic controller adjustments and real-time remote commands. All endpoints mandate a string matching the configured api_token sent via HTTP standard Bearer header validation: Authorization: Bearer <api_token>.Request Control Route: POST /api/v1/controller/remote-unlock1. Remote Unlock Strike BypassBypasses typical credential processing validation to trigger a direct mechanical release cycle.
-JSON
-```
-{
-  "controller_id": "CONTROLLER-HQ-01",
-  "command": "REMOTE_UNLOCK"
-}
-2. Master Emergency Lockdown DeploymentBlocks all active badge-swipe access rules instantly across the local reader.JSON{
-  "controller_id": "CONTROLLER-HQ-01",
-  "command": "FORCE_LOCK"
-}
-3. Dynamic Hardware Profile UpdateReallocates internal memory structures, cleanly releases physical character device file handles, re-binds pins on-the-fly, updates local disk records, and mirrors profiles to the core infrastructure database without losing application state.JSON{
-  "controller_id": "CONTROLLER-HQ-01",
-  "command": "UPDATE_CONFIG",
-  "new_config_payload": {
-    "gpio_chip_device": "/dev/gpiochip4",
-    "wiegand_d0_pin": 4,
-    "wiegand_d1_pin": 5,
-    "lock_relay_pin": 12,
-    "dsm_pin": 22,
-    "rex_pin": 23,
-    "wiegand_timeout_ms": 60,
-    "dho_timeout_secs": 45,
-    "apb_strict": false,
-    "dfo_enabled": true,
-    "dho_enabled": true,
-    "dho_pre_alarm_secs": 20,
-    "alarm_horn_pin": 26,
-    "dsm_normally_closed": false
-  }
-}
-```
-Note: Additional values supported by the command structure include REMOVE_LOCKDOWN, SUSTAIN_OPEN, CLOSE_SUSTAIN, and CLEAR_ALARMS.Local Compilation & DeploymentEnvironment PrerequisitesGo Compiler Platform Toolchain (v1.24.4 or newer recommended).CGO_ENABLED=1 is required for the application to compile the C-backed native SQLite subsystem wrapper interface (go-sqlite3).Linux target runtime kernel equipped with standard /dev/gpiochipX layout nodes.Compilation CommandsBash# Clone repository and navigate to entry root directory
-cd PiACS-EDGE
+# PiACS-EDGE: Physical Access Control System Edge & Enterprise Management Platform
 
-# Download and tidy upstream dependency modules
-go mod download
-go mod tidy
+PiACS-EDGE is an enterprise-grade physical access control system (PACS) engineered for distributed target execution. It contains two main components:
+1. **PiACS-EDGE Engine (Edge Node)**: An autonomous controller written in Go that runs directly on a Raspberry Pi, interfacing with card readers, strike relays, and sensors over Linux's dynamic GPIO character device interface. It features local SQLite database failover survivability.
+2. **PiACS Management Console (Central Server)**: A high-performance central Go web server and dark-themed, glassmorphic Single Page Application (SPA) dashboard that provides real-time event telemetry (swipes, door status, DFO/DHO alarms) via WebSockets/SSE and supports timezone schedule mapping, holiday calendars, and sitewide command overrides.
 
-# Compile production binary optimized for edge platform execution
-CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o piacs-edge-engine .
-Process Management SetupTo run the executable as a managed background system daemon, configure a systemd unit profile: /etc/systemd/system/piacs-edge.service.Ini, TOML[Unit]
-```
-Description=PiACS Access Control Edge Engine
-After=network.target
+---
 
-[Service]
-Type=simple
-WorkingDirectory=/opt/piacs
-ExecStart=/opt/piacs/piacs-edge-engine
-Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/piacs_engine_stdout.log
-StandardError=append:/var/log/piacs_engine_stderr.log
+## Architectural Layout
 
-[Install]
-WantedBy=multi-user.target
-Bash# Register and start the system service
-sudo systemctl daemon-reload
-sudo systemctl enable piacs-edge.service
-sudo systemctl start piacs-edge.service
 ```
-System Diagnostics & TroubleshootingThe controller routes system errors to a rolling disk log (edge_engine.log).Critical Resource Lockout MatrixIf an engine thread attempts to claim exclusive pin reservations on a GPIO offset currently held by a separate kernel worker or alternative runtime system application, PiACS-EDGE generates a detailed hardware lockout warning matrix:
+                         +-----------------------------------+
+                         |  Central Management Web Dashboard |
+                         |       (HTML5 / CSS3 / JS SPA)     |
+                         +-----------------------------------+
+                                           ^
+                                           | WebSockets / SSE / REST
+                                           v
+                         +-----------------------------------+
+                         |  Central Go Web Server (Port 8000) |
+                         +-----------------------------------+
+                                    /              \
+         Command Overrides (HTTPS) /                \ Sync & Audit logs
+                                  v                  v
+                       +-------------------+   +--------------------+
+                       | PiACS-EDGE Engine |<->| PostgreSQL Database|
+                       |  (Raspberry Pi)   |   |   (Port 5432)      |
+                       +-------------------+   +--------------------+
+                           /           \
+                 Local IO /             \ Fallback Lookups
+                         v               v
+            [Peripherals, Readers]   [Local SQLite Cache]
 ```
---------------------------------------------------------------------------------
-[RESOURCE LOCKOUT ERROR]
-Target Subsystem Element : D0
-Physical Board Setting   : GPIO Offset 4
-Kernel Error Reason      : device or resource busy
-Current Active Consumer  : legacy-sysfs-daemon-app
---------------------------------------------------------------------------------\
-```
-Resolution Steps:Check the active consumer line noted in the diagnostic message.Terminate competing services targeting the corresponding peripheral line interfaces (lsof /dev/gpiochip*).Verify line settings inside config.json against your hardware schematic documentation.
+
+---
+
+## Key Features
+
+1. **Autonomous Failover Survivability**:
+   - **Online Mode**: Swipes are fully evaluated against PostgreSQL, checking user active posture, timezone active hours, and holiday schedules using the database server's time zone.
+   - **Offline Mode**: If the PostgreSQL network is lost, the Pi seamlessly falls back to the internal `edge_cache.db` (SQLite) database cache to process swipes using basic active/inactive validation to guarantee perimeter uptime.
+2. **Dynamic Timezones & Holidays Calendar**:
+   - Normalized relational tables allow configuring time windows for weekdays (0-6) and holiday exceptions (day type 7).
+   - Swiping during a holiday requires the credential to hold a Holiday-specific timezone override interval, preventing un-escorted access during closed schedules.
+3. **Real-time Push Telemetry**:
+   - PostgreSQL triggers fire `NOTIFY` events immediately upon log insertions.
+   - The central web server listens using `pq.Listener` and streams log records instantly to the frontend using Server-Sent Events (SSE), eliminating browser polling latency.
+4. **Sitewide and Local Directives**:
+   - Support for triggering actions (Remote Unlock, Emergency Lockdown, Clear Alarm Siren) on individual doors or concurrently across all active nodes in the facility.
+5. **Interactive Door Visualizer & Console**:
+   - SVG visual representations of doors that swing open, secure, or blink red dynamically in response to state transitions (open/closed) and alarms (Door Forced Open - DFO, Door Held Open - DHO, Anti-Passback - APB).
+   - Searchable audit logs with CSV exporting capabilities.
+
+---
+
+## Setup & Deployment Guide
+
+### Prerequisites
+- **Raspberry Pi**: Running a Debian-based OS (ARM64) with `go` (v1.24.4+ recommended) and `openssl`.
+- **Database Server**: PostgreSQL database instance.
+- **Frontend Server**: Standard Linux VM (x86_64 or ARM64) to serve the management portal.
+
+---
+
+### Step 1: Database Setup (ACS-DB)
+1. Log in to your PostgreSQL instance and create the security database:
+   ```sql
+   CREATE DATABASE piacs_security;
+   ```
+2. Apply the database schemas defined in `db_schema_schedules.sql`:
+   ```bash
+   psql -d piacs_security -f db_schema_schedules.sql
+   ```
+3. Apply the real-time notification triggers defined in `triggers.sql`:
+   ```bash
+   psql -d piacs_security -f triggers.sql
+   ```
+
+---
+
+### Step 2: Edge Node Setup (Raspberry Pi)
+1. Transfer the codebase to the Pi (e.g. `/home/admin/PiACS-EDGE`).
+2. Generate local self-signed TLS certificates for the secure override API:
+   ```bash
+   openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt -sha256 -days 3650 -nodes -subj "/CN=192.168.1.200"
+   ```
+3. Update `config.json` to configure the target database connection, API security tokens, and hardware pin mappings.
+4. Compile the engine directly on the Pi:
+   ```bash
+   CGO_ENABLED=1 go build -ldflags="-s -w" -o piacs-edge-engine .
+   ```
+5. Deploy as a background systemd service:
+   - Copy `piacs-edge.service` to `/etc/systemd/system/piacs-edge.service`.
+   - Reload systemd and start the daemon:
+     ```bash
+     sudo systemctl daemon-reload
+     sudo systemctl enable piacs-edge.service
+     sudo systemctl start piacs-edge.service
+     ```
+
+---
+
+### Step 3: Central Server & Frontend Setup
+1. From the repository root, compile the central server binary:
+   ```bash
+   go build -o central-server central_server/server.go
+   ```
+2. Transfer the `central-server` binary and the `central_server/web` folder to the frontend host (e.g. `/root/`).
+3. Deploy as a background systemd service:
+   - Copy `central-server.service` to `/etc/systemd/system/central-server.service`.
+   - Reload and start:
+     ```bash
+     sudo systemctl daemon-reload
+     sudo systemctl enable central-server.service
+     sudo systemctl start central-server.service
+     ```
+4. Access the administration portal via your web browser at `http://<FRONTEND_IP>:8000`.
+
+---
+
+## Technical Specifications & DB Schemas
+
+- **Holidays Table (`holidays`)**: Holds date exceptions (`holiday_date DATE PRIMARY KEY`).
+- **Time Zones Table (`time_zones`)**: Named schedules.
+- **Intervals Table (`time_zone_intervals`)**: Defines start/end windows for weekdays (0-6) and holidays (7).
+- **Access Level Time Zones (`access_level_time_zones`)**: Maps access levels to readers and timezones.
+- **Credentials (`credentials` & `users`)**: Holds active statuses and badge IDs.
+- **Access Logs (`access_logs`)**: Records `CARD_GRANT`, `DENY`, `DENY_SCHEDULE`, `DOOR_OPEN`, `DOOR_CLOSE`, `APB_VIOLATION`.
+- **System Alarms (`system_alarms`)**: Records active hardware breaches (`DFO`, `DHO`).

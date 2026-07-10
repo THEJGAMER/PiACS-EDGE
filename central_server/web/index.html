@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiACS-EDGE | Enterprise Access & Command Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo">
+                <span class="icon-glow"></span>
+                <h2>PiACS<span>EDGE</span></h2>
+            </div>
+            <nav class="menu">
+                <a href="#dashboard" class="menu-item active" id="btn-dashboard">Dashboard Control</a>
+                <a href="#map" class="menu-item" id="btn-map">Portal Map</a>
+                <a href="#threat" class="menu-item" id="btn-threat">Threat Postures</a>
+                <a href="#health" class="menu-item" id="btn-health">System Health</a>
+                <a href="#schedules" class="menu-item" id="btn-schedules">Schedules & Holidays</a>
+                <a href="#access" class="menu-item" id="btn-access">Access Levels</a>
+                <a href="#credentials" class="menu-item" id="btn-credentials">Credentials (Badges)</a>
+                <a href="#syslogs" class="menu-item" id="btn-syslogs">System Logs</a>
+                <a href="#config" class="menu-item" id="btn-config">🔧 Controller Config</a>
+            </nav>
+            <div class="system-status">
+                <div class="status-indicator online" id="server-indicator"></div>
+                <span>Sync Node: Online</span>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header Banner -->
+            <header class="top-bar">
+                <div class="bar-title">
+                    <h1>Enterprise Access & Command Center</h1>
+                    <p class="subtitle">Real-time supervision and perimeter security matrix</p>
+                </div>
+                <div class="quick-stats">
+                    <div class="stat-badge"><span class="label">Controllers:</span> <span class="val" id="stat-ctrls">0</span></div>
+                    <div class="stat-badge"><span class="label">Alarms:</span> <span class="val alarm" id="stat-alarms">0</span></div>
+                </div>
+            </header>
+
+            <!-- Dashboard View -->
+            <section id="view-dashboard" class="view-panel active">
+                <!-- Sitewide Global Directives Panel -->
+                <div class="card glass sitewide-card mb-2">
+                    <h3>Sitewide Emergency Overrides</h3>
+                    <div class="global-actions-grid">
+                        <button class="btn btn-grant" id="btn-global-unlock">
+                            <span class="icon">🔓</span> UNLOCK ALL DOORS
+                        </button>
+                        <button class="btn btn-lockdown" id="btn-global-lockdown">
+                            <span class="icon">🚨</span> ENGAGE GLOBAL LOCKDOWN
+                        </button>
+                        <button class="btn btn-clear" id="btn-global-clear">
+                            <span class="icon">🛡️</span> CLEAR ALL SIRENS & ALARMS
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Controllers Grid -->
+                <div class="section-header">
+                    <h3>Monitored Doors & Perimeter Zones</h3>
+                </div>
+                <div class="grid-doors" id="doors-container">
+                    <!-- Loaded dynamically via JavaScript -->
+                </div>
+
+                <!-- Log Console with Advanced Filtering & Exporting -->
+                <div class="card glass console-card full-width mt-2">
+                    <div class="card-header flex-header">
+                        <div class="title-with-pulse">
+                            <h3>Access Logs & Alarm Telemetry Stream</h3>
+                            <span class="pulse-indicator"></span>
+                        </div>
+                        <div class="console-controls">
+                            <select id="log-filter-type" class="console-select">
+                                <option value="ALL">All Events</option>
+                                <option value="GRANT">Grants Only</option>
+                                <option value="DENY">Denies Only</option>
+                                <option value="ALARM">Alarms Only</option>
+                            </select>
+                            <input type="text" id="log-search" placeholder="Search logs (name, card)..." class="console-input">
+                            <button class="btn-export" id="btn-log-export">💾 Export CSV</button>
+                        </div>
+                    </div>
+                    <div class="log-console" id="log-console">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Schedules & Holidays View -->
+            <section id="view-schedules" class="view-panel">
+                <div class="grid-2col">
+                    <div class="card glass">
+                        <h3>Access Schedules & Time Zones</h3>
+                        <form id="form-timezone" class="form-container">
+                            <div class="form-group">
+                                <label for="tz-name">Time Zone Name</label>
+                                <input type="text" id="tz-name" required placeholder="e.g. Normal Business Hours">
+                            </div>
+                            <div class="form-group">
+                                <label>Intervals Configuration</label>
+                                <div id="tz-intervals-container">
+                                    <div class="interval-row">
+                                        <select class="sel-day">
+                                            <option value="1">Monday</option>
+                                            <option value="2">Tuesday</option>
+                                            <option value="3">Wednesday</option>
+                                            <option value="4">Thursday</option>
+                                            <option value="5">Friday</option>
+                                            <option value="6">Saturday</option>
+                                            <option value="0">Sunday</option>
+                                            <option value="7">Holiday Only</option>
+                                        </select>
+                                        <input type="time" class="time-start" value="08:00">
+                                        <input type="time" class="time-end" value="17:00">
+                                    </div>
+                                </div>
+                                <button type="button" class="btn-secondary" id="btn-add-interval">+ Add Day Interval</button>
+                            </div>
+                            <button type="submit" class="btn btn-submit">Save Time Zone</button>
+                        </form>
+
+                        <div class="list-container mt-2">
+                            <h4>Active Time Zones</h4>
+                            <table class="data-table" id="table-timezones">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Name</th>
+                                        <th>Configured Days & Windows</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card glass">
+                        <h3>Holidays Calendar</h3>
+                        <form id="form-holiday" class="form-container">
+                            <div class="form-group">
+                                <label for="hol-date">Holiday Date</label>
+                                <input type="date" id="hol-date" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="hol-name">Holiday Description</label>
+                                <input type="text" id="hol-name" required placeholder="e.g. Christmas Day">
+                            </div>
+                            <button type="submit" class="btn btn-submit">Register Holiday Date</button>
+                        </form>
+
+                        <div class="list-container mt-2">
+                            <h4>Registered Holidays</h4>
+                            <table class="data-table" id="table-holidays">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Holiday Label</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Access Levels View -->
+            <section id="view-access" class="view-panel">
+                <div class="card glass">
+                    <h3>Access Levels Management</h3>
+                    <div class="grid-2col">
+                        <form id="form-access-level" class="form-container">
+                            <div class="form-group">
+                                <label for="al-name">Access Level Name</label>
+                                <input type="text" id="al-name" required placeholder="e.g. IT Staff 24/7">
+                            </div>
+                            <div class="form-group">
+                                <label for="al-reader">Target Controller/Reader</label>
+                                <select id="al-reader" required>
+                                    <!-- Loaded dynamically -->
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="al-timezone">Associated Time Zone</label>
+                                <select id="al-timezone" required></select>
+                            </div>
+                            <button type="submit" class="btn btn-submit">Create Access Level</button>
+                        </form>
+
+                        <div class="list-container">
+                            <h4>Configured Access Levels</h4>
+                            <table class="data-table" id="table-access-levels">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Access Level</th>
+                                        <th>Reader</th>
+                                        <th>Time Zone</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Credentials View -->
+            <section id="view-credentials" class="view-panel">
+                <div class="card glass">
+                    <h3>Badge Credentials & Employee Mapping</h3>
+                    <div class="grid-2col">
+                        <form id="form-credential" class="form-container">
+                            <input type="hidden" id="cred-user-id" value="">
+                            <input type="hidden" id="cred-id" value="">
+                            <div class="form-group">
+                                <label for="cred-name">Employee Full Name</label>
+                                <input type="text" id="cred-name" required placeholder="e.g. Sarah Jenkins">
+                            </div>
+                            <div class="form-group">
+                                <label for="cred-fc">Facility Code</label>
+                                <input type="number" id="cred-fc" required placeholder="3242" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="cred-cid">Card ID (Badge Number)</label>
+                                <input type="number" id="cred-cid" required placeholder="669653" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="cred-bits">Wiegand Bit Length</label>
+                                <input type="number" id="cred-bits" value="35" required min="26" max="64">
+                            </div>
+                            <div class="form-group">
+                                <label for="cred-pin">Keypad PIN Code (Optional)</label>
+                                <input type="password" id="cred-pin" placeholder="e.g. 1234" maxlength="8">
+                            </div>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="cred-start-date">Activation Date</label>
+                                    <input type="date" id="cred-start-date" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="cred-end-date">Expiration Date</label>
+                                    <input type="date" id="cred-end-date" required>
+                                </div>
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="cred-active" checked>
+                                <label for="cred-active">Credential Active Status</label>
+                            </div>
+                            <div class="form-group">
+                                <label>Assign Access Levels</label>
+                                <div id="cred-access-levels-container" class="checkbox-list">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-submit" id="btn-save-badge">Register Badge Credential</button>
+                        </form>
+
+                        <div class="list-container">
+                            <h4>Registered Badges</h4>
+                            <table class="data-table" id="table-credentials">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>FC/CardID</th>
+                                        <th>Active Range</th>
+                                        <th>Status</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Portal Map View -->
+            <section id="view-map" class="view-panel">
+                <div class="card glass">
+                    <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                        <h3>Portal Floor Plan Map</h3>
+                        <p class="subtitle">Drag and place controllers onto the security layout map. Real-time door status indicators active.</p>
+                    </div>
+                    <div class="map-container-wrapper" style="position: relative; background: radial-gradient(circle, #10121d 0%, #08090f 100%); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
+                        <!-- SVG Base blueprint grid layout -->
+                        <svg id="map-canvas" viewBox="0 0 1000 500" width="100%" height="100%" style="position: absolute; top: 0; left: 0; user-select: none;">
+                            <!-- Grid background -->
+                            <defs>
+                                <pattern id="map-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                                </pattern>
+                            </defs>
+                            <rect width="100%" height="100%" fill="url(#map-grid)" />
+                            
+                            <!-- Simple Blueprint Floor Plan Layout Lines -->
+                            <rect x="50" y="50" width="900" height="400" fill="none" stroke="rgba(255, 255, 255, 0.1)" stroke-width="4" rx="10"/>
+                            <!-- Inner room partitions -->
+                            <line x1="350" y1="50" x2="350" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                            <line x1="650" y1="50" x2="650" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                            <line x1="350" y1="200" x2="650" y2="200" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                            
+                            <!-- Texts for room names -->
+                            <text x="200" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Server Room</text>
+                            <text x="500" y="125" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Command Lobby</text>
+                            <text x="500" y="325" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Main Office</text>
+                            <text x="800" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Bedroom Area</text>
+                        </svg>
+                        
+                        <!-- Placed portal nodes will render dynamically via JS here -->
+                        <div id="map-nodes-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Threat Postures View -->
+            <section id="view-threat" class="view-panel">
+                <div class="card glass">
+                    <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                        <h3>Crisis Threat Level Postures</h3>
+                        <p class="subtitle">Select the system-wide threat status condition. Modifies scheduling and controller access validation policies.</p>
+                    </div>
+                    <div class="threat-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 1rem;">
+                        <!-- Normal (Green) -->
+                        <div class="card threat-card card-threat-normal active" id="threat-card-NORMAL" style="cursor: pointer; border: 2px solid transparent; transition: all 0.3s ease;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🟢</div>
+                            <h4>Condition Green</h4>
+                            <span class="threat-badge status-secure" style="display: inline-block; margin: 0.5rem 0; font-size: 0.8rem; font-weight: bold;">NORMAL POSTURE</span>
+                            <p style="font-size: 0.85rem; color: #aaa; line-height: 1.4;">Standard operation. All timezone intervals, schedules, reader policies, and card permissions operate normally.</p>
+                        </div>
+                        
+                        <!-- High Alert (Amber) -->
+                        <div class="card threat-card card-threat-alert" id="threat-card-HIGH_ALERT" style="cursor: pointer; border: 2px solid transparent; transition: all 0.3s ease;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🟡</div>
+                            <h4>Condition Amber</h4>
+                            <span class="threat-badge status-warning" style="display: inline-block; margin: 0.5rem 0; font-size: 0.8rem; font-weight: bold;">HIGH SECURITY</span>
+                            <p style="font-size: 0.85rem; color: #aaa; line-height: 1.4;">Access Restricted. Timezone schedules suspended. Standard staff badges blocked. Only Super Admins allowed entry.</p>
+                        </div>
+                        
+                        <!-- Lockdown (Red) -->
+                        <div class="card threat-card card-threat-lockdown" id="threat-card-LOCKDOWN" style="cursor: pointer; border: 2px solid transparent; transition: all 0.3s ease;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">🔴</div>
+                            <h4>Condition Red</h4>
+                            <span class="threat-badge status-alarm" style="display: inline-block; margin: 0.5rem 0; font-size: 0.8rem; font-weight: bold;">FULL LOCKDOWN</span>
+                            <p style="font-size: 0.85rem; color: #aaa; line-height: 1.4;">Complete Isolation. All portals locked shut. All card swipes rejected. Force Lock commands dispatched to controllers.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- System Health View -->
+            <section id="view-health" class="view-panel">
+                <div class="card glass">
+                    <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                        <h3>System Health & Diagnostics</h3>
+                        <p class="subtitle">Live CPU usage, memory load, SQLite database queue counts, and connection latency for registered controllers.</p>
+                    </div>
+                    <div id="health-cards-container" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem;">
+                        <!-- Dynamic health cards render here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- System Logs View -->
+            <section id="view-syslogs" class="view-panel">
+                <div class="card glass">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
+                        <h3>Controller System Logs</h3>
+                        <div class="filters-row" style="display: flex; gap: 0.5rem; align-items: center;">
+                            <select id="log-ctrl-select" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                                <option value="">All Controllers</option>
+                            </select>
+                            <select id="log-level-select" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                                <option value="">All Levels</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARN">WARN</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="FATAL">FATAL</option>
+                            </select>
+                            <input type="text" id="log-msg-search" placeholder="Search logs..." style="padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; outline: none; width: 200px;">
+                            <button class="btn btn-secondary" id="btn-syslog-refresh" style="padding: 0.4rem 0.8rem;">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    <div class="syslog-console-wrapper" style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; height: 500px; overflow-y: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4;">
+                        <div class="console-body" id="syslog-console">
+                            <!-- Real-time logs load here -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Controller Configuration View -->
+            <section id="view-config" class="view-panel">
+                <!-- Auth Gate -->
+                <div id="config-auth-gate" class="card glass" style="max-width: 420px; margin: 2rem auto; text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
+                    <h3>Authentication Required</h3>
+                    <p class="subtitle" style="margin-bottom: 1.5rem;">Enter the admin password to access controller hardware configuration.</p>
+                    <form id="form-config-auth" class="form-container">
+                        <div class="form-group">
+                            <label for="config-password">Admin Password</label>
+                            <input type="password" id="config-password" required placeholder="Enter admin password">
+                        </div>
+                        <button type="submit" class="btn btn-submit" id="btn-config-login">🔓 Authenticate</button>
+                        <p id="config-auth-error" style="color: #ff4444; font-size: 0.85rem; margin-top: 0.5rem; display: none;"></p>
+                    </form>
+                </div>
+
+                <!-- Config Panel (hidden until auth) -->
+                <div id="config-panel" style="display: none;">
+                    <div class="card glass mb-2">
+                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                            <div>
+                                <h3>Controller Hardware Configuration</h3>
+                                <p class="subtitle">Remotely configure GPIO pin mappings, timeouts, and security policies. Changes are pushed live to the edge controller.</p>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <select id="config-ctrl-select" style="padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
+                                    <!-- Populated dynamically -->
+                                </select>
+                                <button class="btn btn-secondary" id="btn-config-load" style="padding: 0.4rem 0.8rem;">Load Config</button>
+                            </div>
+                        </div>
+
+                        <form id="form-controller-config" class="form-container">
+                            <input type="hidden" id="cfg-controller-id">
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                                <!-- GPIO Chip -->
+                                <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-blue);">📌 GPIO Device</h4>
+                                    <div class="form-group">
+                                        <label for="cfg-gpio-chip">GPIO Chip Device</label>
+                                        <input type="text" id="cfg-gpio-chip" value="gpiochip0">
+                                    </div>
+                                </div>
+
+                                <!-- Wiegand Reader Pins -->
+                                <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-blue);">🔌 Wiegand Reader</h4>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                        <div class="form-group">
+                                            <label for="cfg-d0">D0 Pin</label>
+                                            <input type="number" id="cfg-d0" value="23">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-d1">D1 Pin</label>
+                                            <input type="number" id="cfg-d1" value="24">
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-wiegand-timeout">Wiegand Timeout (ms)</label>
+                                        <input type="number" id="cfg-wiegand-timeout" value="50">
+                                    </div>
+                                </div>
+
+                                <!-- Output Pins -->
+                                <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-green);">💡 Output Pins</h4>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                        <div class="form-group">
+                                            <label for="cfg-relay">Lock Relay</label>
+                                            <input type="number" id="cfg-relay" value="18">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-red-led">Red LED</label>
+                                            <input type="number" id="cfg-red-led" value="5">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-green-led">Green LED</label>
+                                            <input type="number" id="cfg-green-led" value="6">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-buzzer">Buzzer</label>
+                                            <input type="number" id="cfg-buzzer" value="7">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-horn">Alarm Horn</label>
+                                            <input type="number" id="cfg-horn" value="17">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Sensor Pins -->
+                                <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-amber);">🔍 Sensor Pins</h4>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                                        <div class="form-group">
+                                            <label for="cfg-dsm">DSM Pin</label>
+                                            <input type="number" id="cfg-dsm" value="22">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="cfg-rex">REX Pin</label>
+                                            <input type="number" id="cfg-rex" value="27">
+                                        </div>
+                                    </div>
+                                    <div class="form-group" style="margin-top: 0.5rem;">
+                                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                            <input type="checkbox" id="cfg-dsm-nc" style="width: auto;">
+                                            <span>DSM Normally Closed</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- DHO / DFO / APB Security Policies -->
+                                <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; grid-column: span 2;">
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-red);">🛡️ Security Policies</h4>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                                        <div>
+                                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.75rem;">
+                                                <input type="checkbox" id="cfg-dho-enabled" checked style="width: auto;">
+                                                <span>Door Held Open (DHO)</span>
+                                            </label>
+                                            <div class="form-group">
+                                                <label for="cfg-dho-timeout">DHO Timeout (sec)</label>
+                                                <input type="number" id="cfg-dho-timeout" value="60">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="cfg-dho-prealarm">Pre-Alarm (sec)</label>
+                                                <input type="number" id="cfg-dho-prealarm" value="15">
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.75rem;">
+                                                <input type="checkbox" id="cfg-dfo-enabled" style="width: auto;">
+                                                <span>Door Forced Open (DFO)</span>
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.75rem;">
+                                                <input type="checkbox" id="cfg-apb-strict" style="width: auto;">
+                                                <span>Strict Anti-Passback</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                                <button type="button" class="btn btn-secondary" id="btn-config-reset">↩️ Reset</button>
+                                <button type="submit" class="btn btn-submit" id="btn-config-save">💾 Save & Push to Controller</button>
+                            </div>
+                            <p id="config-save-status" style="font-size: 0.85rem; margin-top: 0.75rem; text-align: right; display: none;"></p>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <div id="toast-container" class="toast-container"></div>
+    <script src="app.js"></script>
+</body>
+</html>

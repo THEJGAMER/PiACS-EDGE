@@ -176,6 +176,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 					if r.lastLoggedState != "OPEN" {
 						r.logMessage(fmt.Sprintf("[DOOR] Position status changed to OPEN. Auth-Latch: %t, DFO-Enabled: %t", r.ExpectOpen, r.Cfg.DfoEnabled))
 						r.lastLoggedState = "OPEN"
+						alarmCallback("DOOR_OPEN", "Door position status changed to OPEN.")
 					}
 
 					// 1. DFO TRACKING LAYER
@@ -227,6 +228,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 						r.hornLine.SetValue(0) 
 						r.logMessage("[DOOR] Contacts met. Perimeter returned to secure latched state. All alert matrices reset.")
 						r.lastLoggedState = "SECURE"
+						alarmCallback("DOOR_CLOSE", "Door position status returned to SECURE.")
 					}
 				}
 			}

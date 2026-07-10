@@ -35,9 +35,58 @@ type APICommandRequest struct {
 	NewConfig    *HardwareProfile `json:"new_config_payload,omitempty"`
 }
 
+type DBLogWriter struct {
+	Fallback io.Writer
+}
+
+func (w *DBLogWriter) Write(p []byte) (n int, err error) {
+	n, err = w.Fallback.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	msg := strings.TrimSpace(string(p))
+	level := "INFO"
+	if strings.Contains(msg, "-FATAL]") {
+		level = "FATAL"
+	} else if strings.Contains(msg, "-ERR]") || strings.Contains(msg, "-WARNING]") || strings.Contains(msg, "-ALERT]") {
+		level = "ERROR"
+	} else if strings.Contains(msg, "[WARN]") {
+		level = "WARN"
+	}
+
+	cleanMsg := msg
+	if len(msg) > 20 {
+		if msg[4] == '/' && msg[7] == '/' && msg[13] == ':' && msg[16] == ':' {
+			cleanMsg = strings.TrimSpace(msg[20:])
+		}
+	}
+
+	go func(lvl, m string) {
+		if runtimeState.ControllerID == "" || localCache == nil {
+			return
+		}
+		cID := runtimeState.ControllerID
+		if cID == "" {
+			cID = "BEDRM-1"
+		}
+
+		if dbConn != nil && !isOffline {
+			_, execErr := dbConn.Exec("INSERT INTO controller_logs (controller_id, level, message) VALUES ($1, $2, $3)", cID, lvl, m)
+			if execErr != nil {
+				localCache.Exec("INSERT INTO controller_logs (controller_id, level, message) VALUES (?, ?, ?)", cID, lvl, m)
+			}
+		} else {
+			localCache.Exec("INSERT INTO controller_logs (controller_id, level, message) VALUES (?, ?, ?)", cID, lvl, m)
+		}
+	}(level, cleanMsg)
+
+	return n, nil
+}
+
 func initLogger() {
 	localLogFile, _ = os.OpenFile("edge_engine.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	edgeLogger = log.New(io.MultiWriter(os.Stdout, localLogFile), "", log.Ldate|log.Ltime|log.Lshortfile)
+	edgeLogger = log.New(&DBLogWriter{Fallback: io.MultiWriter(os.Stdout, localLogFile)}, "", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 func initLocalCache() {
@@ -54,35 +103,184 @@ func initLocalCache() {
 		user_active INT,
 		cred_active INT,
 		last_area TEXT,
+		activation_date TEXT DEFAULT NULL,
+		expiration_date TEXT DEFAULT NULL,
+		pin_code TEXT DEFAULT NULL,
 		PRIMARY KEY(facility_code, card_id)
+	);
+	CREATE TABLE IF NOT EXISTS controller_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		log_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		controller_id TEXT NOT NULL,
+		level TEXT NOT NULL,
+		message TEXT NOT NULL
 	);`
 	localCache.Exec(statement)
+
+	localCache.Exec("ALTER TABLE local_credentials ADD COLUMN activation_date TEXT DEFAULT NULL;")
+	localCache.Exec("ALTER TABLE local_credentials ADD COLUMN expiration_date TEXT DEFAULT NULL;")
+	localCache.Exec("ALTER TABLE local_credentials ADD COLUMN pin_code TEXT DEFAULT NULL;")
 }
+
+func syncBufferedLogsToPostgres() {
+	if isOffline || localCache == nil || dbConn == nil {
+		return
+	}
+	rows, err := localCache.Query("SELECT id, log_timestamp, level, message FROM controller_logs ORDER BY id ASC")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var logsToSync []struct {
+		ID        int
+		Timestamp string
+		Level     string
+		Message   string
+	}
+	for rows.Next() {
+		var l struct {
+			ID        int
+			Timestamp string
+			Level     string
+			Message   string
+		}
+		if err := rows.Scan(&l.ID, &l.Timestamp, &l.Level, &l.Message); err == nil {
+			logsToSync = append(logsToSync, l)
+		}
+	}
+
+	if len(logsToSync) == 0 {
+		return
+	}
+
+	tx, err := dbConn.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("INSERT INTO controller_logs (controller_id, level, message, log_timestamp) VALUES ($1, $2, $3, $4)")
+	if err != nil {
+		return
+	}
+	defer stmt.Close()
+
+	cID := runtimeState.ControllerID
+	for _, l := range logsToSync {
+		_, err := stmt.Exec(cID, l.Level, l.Message, l.Timestamp)
+		if err != nil {
+			edgeLogger.Printf("[DB-ERR] Failed uploading buffered log %d: %v\n", l.ID, err)
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return
+	}
+
+	for _, l := range logsToSync {
+		localCache.Exec("DELETE FROM controller_logs WHERE id = ?", l.ID)
+	}
+	edgeLogger.Printf("[CACHE-SYNC] Synchronized %d buffered diagnostic logs upstream.\n", len(logsToSync))
+}
+
 
 func syncPostgresToSQLiteCache() {
 	if isOffline { return }
-	rows, err := dbConn.Query("SELECT c.facility_code, c.card_id, u.employee_name, u.is_active, c.is_active, u.last_area FROM credentials c JOIN users u ON c.user_id = u.user_id")
+	rows, err := dbConn.Query("SELECT c.facility_code, c.card_id, u.employee_name, u.is_active, c.is_active, u.last_area, c.activation_date, c.expiration_date, c.pin_code FROM credentials c JOIN users u ON c.user_id = u.user_id")
 	if err != nil { return }
 	defer rows.Close()
 
 	localCache.Exec("DELETE FROM local_credentials")
 	tx, _ := localCache.Begin()
 	for rows.Next() {
-		// PostgreSQL uses boolean but SQLite maps them to 1/0 integers natively
 		var fc, cid int
 		var uActBool, cActBool bool
 		var name, area string
-		rows.Scan(&fc, &cid, &name, &uActBool, &cActBool, &area)
+		var actDate, expDate sql.NullTime
+		var pin sql.NullString
+		rows.Scan(&fc, &cid, &name, &uActBool, &cActBool, &area, &actDate, &expDate, &pin)
 		
 		uActInt := 0
 		if uActBool { uActInt = 1 }
 		cActInt := 0
 		if cActBool { cActInt = 1 }
 
-		tx.Exec("INSERT INTO local_credentials VALUES (?, ?, ?, ?, ?, ?)", fc, cid, name, uActInt, cActInt, area)
+		var actStr, expStr, pinStr interface{}
+		if actDate.Valid { actStr = actDate.Time.Format("2006-01-02") } else { actStr = nil }
+		if expDate.Valid { expStr = expDate.Time.Format("2006-01-02") } else { expStr = nil }
+		if pin.Valid { pinStr = pin.String } else { pinStr = nil }
+
+		tx.Exec("INSERT INTO local_credentials VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", fc, cid, name, uActInt, cActInt, area, actStr, expStr, pinStr)
 	}
 	tx.Commit()
 	edgeLogger.Println("[CACHE-SYNC] Local SQLite survivability mirror table refreshed.")
+}
+
+func collectSystemHealth() (float64, float64, int) {
+	cpuLoad := 0.0
+	if f, err := os.Open("/proc/loadavg"); err == nil {
+		defer f.Close()
+		var load1, load5, load15 float64
+		if _, err := fmt.Fscanf(f, "%f %f %f", &load1, &load5, &load15); err == nil {
+			cpuLoad = load1 * 100.0
+		}
+	}
+
+	memUsage := 0.0
+	if f, err := os.Open("/proc/meminfo"); err == nil {
+		defer f.Close()
+		var memTotal, memAvailable uint64
+		var label string
+		for {
+			var val uint64
+			var unit string
+			_, err := fmt.Fscanf(f, "%s %d %s\n", &label, &val, &unit)
+			if err != nil {
+				break
+			}
+			if label == "MemTotal:" {
+				memTotal = val
+			} else if label == "MemAvailable:" {
+				memAvailable = val
+			}
+		}
+		if memTotal > 0 {
+			memUsage = (1.0 - float64(memAvailable)/float64(memTotal)) * 100.0
+		}
+	}
+
+	bufferedLogsCount := 0
+	if localCache != nil {
+		localCache.QueryRow("SELECT COUNT(*) FROM controller_logs").Scan(&bufferedLogsCount)
+	}
+
+	return cpuLoad, memUsage, bufferedLogsCount
+}
+
+func pushSystemHealthTelemetry() {
+	if isOffline || dbConn == nil {
+		return
+	}
+	cpu, mem, bufCount := collectSystemHealth()
+	
+	start := time.Now()
+	var dummy int
+	err := dbConn.QueryRow("SELECT 1").Scan(&dummy)
+	pingMs := int(time.Since(start).Milliseconds())
+	if err != nil {
+		pingMs = 999
+	}
+
+	_, err = dbConn.Exec(`
+		UPDATE controllers 
+		SET cpu_usage = $1, memory_usage = $2, buffered_logs = $3, last_ping_ms = $4, last_heartbeat = NOW()
+		WHERE controller_id = $5`, 
+		cpu, mem, bufCount, pingMs, runtimeState.ControllerID)
+	if err != nil {
+		edgeLogger.Printf("[DB-ERR] Failed uploading health telemetry metrics: %v\n", err)
+	}
 }
 
 func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) {
@@ -339,6 +537,8 @@ func main() {
 		
 		pushLocalConfigToDatabaseReference(runtimeState.HardwareMapping, "BOOT_INITIALIZATION")
 		syncPostgresToSQLiteCache()
+		syncBufferedLogsToPostgres()
+		pushSystemHealthTelemetry()
 	} else {
 		edgeLogger.Println("[DB-OFFLINE] Activating Degraded Offline Mode Mirror Cache Engine.")
 		isOffline = true
@@ -360,8 +560,8 @@ func main() {
 	serverAddress := fmt.Sprintf("0.0.0.0:%d", runtimeState.BackendPort)
 	
 	go func() {
-		edgeLogger.Printf("[API-SERVER] Listening globally on network interface port %s\n", serverAddress)
-		if err := http.ListenAndServe(serverAddress, nil); err != nil && err != http.ErrServerClosed {
+		edgeLogger.Printf("[API-SERVER] Listening securely (HTTPS) on port %s\n", serverAddress)
+		if err := http.ListenAndServeTLS(serverAddress, "server.crt", "server.key", nil); err != nil && err != http.ErrServerClosed {
 			edgeLogger.Printf("[API-SERVER-ERR] Server listener crashed: %v\n", err)
 		}
 	}()
@@ -389,6 +589,8 @@ func main() {
 				
 				pushLocalConfigToDatabaseReference(runtimeState.HardwareMapping, "PERIODIC_HEARTBEAT_SYNC")
 				syncPostgresToSQLiteCache()
+				syncBufferedLogsToPostgres()
+				pushSystemHealthTelemetry()
 			}
 		}
 	}()
@@ -401,23 +603,54 @@ func main() {
 			edgeLogger.Printf("[SWIPE] Raw Bits caught: %d (FC:%d ID:%d)\n", len(bitStream), fc, cid)
 
 			var empName, currentArea string
-			// CRITICAL FIXED SCANNER TYPES: Set natively as bool variables to correctly interface PostgreSQL boolean types
-			var uAct, cAct bool 
+			var uAct, cAct, hasScheduleAccess, isSuperAdmin bool
+			var actDate, expDate sql.NullTime
+			var actDateStr, expDateStr sql.NullString
+
+			var threatLevel string = "NORMAL"
+			if !isOffline {
+				dbConn.QueryRow("SELECT value FROM system_settings WHERE key = 'threat_level'").Scan(&threatLevel)
+			}
 
 			if !isOffline {
 				query := `
-					SELECT u.employee_name, u.is_active, c.is_active, COALESCE(u.last_area, 'OUTSIDE') 
+					WITH current_day_type AS (
+						SELECT CASE 
+							WHEN EXISTS (SELECT 1 FROM holidays WHERE holiday_date = CURRENT_DATE) THEN 7
+							ELSE EXTRACT(DOW FROM CURRENT_TIMESTAMP)
+						END AS day_type
+					)
+					SELECT u.employee_name, u.is_active, c.is_active, COALESCE(u.last_area, 'OUTSIDE'),
+					       EXISTS (
+					           SELECT 1
+					           FROM credential_access_levels cal
+					           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
+					           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
+					           CROSS JOIN current_day_type cdt
+					           WHERE cal.credential_id = c.id
+					             AND altz.reader_id = $3
+					             AND tzi.day_of_week = cdt.day_type
+					             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
+					       ) AS has_schedule_access,
+					       c.activation_date, c.expiration_date,
+					       EXISTS (
+					           SELECT 1
+					           FROM credential_access_levels cal
+					           JOIN access_levels al ON cal.access_level_id = al.id
+					           WHERE cal.credential_id = c.id AND al.name = 'Super Admin'
+					       ) AS is_super_admin
 					FROM credentials c 
 					JOIN users u ON c.user_id = u.user_id 
 					WHERE c.facility_code = $1::bigint AND c.card_id = $2::bigint`
-				err = dbConn.QueryRow(query, fc, cid).Scan(&empName, &uAct, &cAct, &currentArea)
+				err = dbConn.QueryRow(query, fc, cid, runtimeState.ControllerID).Scan(&empName, &uAct, &cAct, &currentArea, &hasScheduleAccess, &actDate, &expDate, &isSuperAdmin)
 			} else {
-				// SQLite mapping layer converting local 1/0 integers straight back to program variables
 				var uActInt, cActInt int
-				query := "SELECT employee_name, user_active, cred_active, last_area FROM local_credentials WHERE facility_code = ? AND card_id = ?"
-				err = localCache.QueryRow(query, fc, cid).Scan(&empName, &uActInt, &cActInt, &currentArea)
+				query := "SELECT employee_name, user_active, cred_active, last_area, activation_date, expiration_date FROM local_credentials WHERE facility_code = ? AND card_id = ?"
+				err = localCache.QueryRow(query, fc, cid).Scan(&empName, &uActInt, &cActInt, &currentArea, &actDateStr, &expDateStr)
 				uAct = (uActInt == 1)
 				cAct = (cActInt == 1)
+				hasScheduleAccess = true
+				isSuperAdmin = false
 			}
 
 			if err != nil {
@@ -426,9 +659,58 @@ func main() {
 				continue
 			}
 
-			if reader.LockdownActive {
-				edgeLogger.Printf("[DENY-LOCKDOWN] High security facility lockdown active. Swipe by user %s rejected.\n", empName)
+			// Expiry and activation validations
+			nowDate := time.Now()
+			if !isOffline {
+				if actDate.Valid && nowDate.Before(actDate.Time) {
+					edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDate.Time.Format("2006-01-02"))
+					reader.ExecuteBuzzerPulse(3)
+					continue
+				}
+				if expDate.Valid && nowDate.After(expDate.Time) {
+					edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDate.Time.Format("2006-01-02"))
+					reader.ExecuteBuzzerPulse(3)
+					continue
+				}
+			} else {
+				if actDateStr.Valid && actDateStr.String != "" {
+					if t, parseErr := time.Parse("2006-01-02", actDateStr.String); parseErr == nil && nowDate.Before(t) {
+						edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDateStr.String)
+						reader.ExecuteBuzzerPulse(3)
+						continue
+					}
+				}
+				if expDateStr.Valid && expDateStr.String != "" {
+					if t, parseErr := time.Parse("2006-01-02", expDateStr.String); parseErr == nil && nowDate.After(t) {
+						edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDateStr.String)
+						reader.ExecuteBuzzerPulse(3)
+						continue
+					}
+				}
+			}
+
+			// System-wide threat level conditions
+			if threatLevel == "LOCKDOWN" || reader.LockdownActive {
+				edgeLogger.Printf("[DENY-LOCKDOWN] Lockdown active. Swipe by user %s rejected.\n", empName)
 				reader.ExecuteBuzzerPulse(5)
+				continue
+			}
+
+			if threatLevel == "HIGH_ALERT" && !isSuperAdmin {
+				edgeLogger.Printf("[DENY-HIGH_ALERT] High Alert active. Swipe by non-super-admin %s rejected.\n", empName)
+				reader.ExecuteBuzzerPulse(4)
+				continue
+			}
+
+			if !hasScheduleAccess {
+				edgeLogger.Printf("[DENY-SCHEDULE] Access schedule constraint active for employee %s (FC:%d ID:%d).\n", empName, fc, cid)
+				reader.ExecuteBuzzerPulse(3)
+				
+				if !isOffline {
+					denyDetails := fmt.Sprintf("Access denied due to schedule constraint. Card outside active timezone or holiday override. FC:%d ID:%d matched %s.", fc, cid, empName)
+					dbConn.Exec("INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'DENY_SCHEDULE', $4)",
+						runtimeState.ControllerID, cid, empName, denyDetails)
+				}
 				continue
 			}
 

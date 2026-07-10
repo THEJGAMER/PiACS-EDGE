@@ -1,0 +1,15 @@
+[Unit]
+Description=PiACS Access Control Edge Engine
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/PiACS-EDGE
+ExecStart=/home/admin/PiACS-EDGE/piacs-edge-engine
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/piacs_engine_stdout.log
+StandardError=append:/var/log/piacs_engine_stderr.log
+
+[Install]
+WantedBy=multi-user.target

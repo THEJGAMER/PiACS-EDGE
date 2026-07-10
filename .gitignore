@@ -10,3 +10,10 @@ edge_engine.log
 
 # Exclude compiled Go binaries/executable outputs
 piacs-edge
+piacs-edge-engine
+central-server
+askpass.sh
+*.db-journal
+*.db-shm
+*.db-wal
+

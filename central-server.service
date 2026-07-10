@@ -1,0 +1,15 @@
+[Unit]
+Description=PiACS Access Control Central Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root
+ExecStart=/root/central-server
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/central_server_stdout.log
+StandardError=append:/var/log/central_server_stderr.log
+
+[Install]
+WantedBy=multi-user.target
