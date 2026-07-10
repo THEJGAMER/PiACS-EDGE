@@ -524,6 +524,33 @@ func handleRemoteUnlockRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleHealthRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Unauthorized: Missing token profile", http.StatusUnauthorized)
+		return
+	}
+	if strings.TrimPrefix(authHeader, "Bearer ") != runtimeState.APIToken {
+		http.Error(w, "Forbidden: Invalid authorization scope", http.StatusForbidden)
+		return
+	}
+
+	cpu, mem, bufCount := collectSystemHealth()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "healthy",
+		"cpu_usage":     cpu,
+		"memory_usage":  mem,
+		"buffered_logs": bufCount,
+	})
+}
+
 func FixHardwareInversion(s string) string {
 	runes := []rune(s)
 	for i, r := range runes {
@@ -596,6 +623,7 @@ func main() {
 	reader.StartListening(stopSignal, reportAlarm)
 
 	http.HandleFunc("/api/v1/controller/remote-unlock", handleRemoteUnlockRequest)
+	http.HandleFunc("/api/v1/health", handleHealthRequest)
 	serverAddress := fmt.Sprintf("0.0.0.0:%d", runtimeState.BackendPort)
 	
 	go func() {

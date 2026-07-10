@@ -13,6 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const targetId = 'view-' + item.id.replace('btn-', '');
             document.getElementById(targetId).classList.add('active');
 
+            // Clear health polling interval when changing tabs
+            if (healthPollInterval) {
+                clearInterval(healthPollInterval);
+                healthPollInterval = null;
+            }
+
             if (item.id === 'btn-syslogs') {
                 loadControllerLogs();
             } else if (item.id === 'btn-map') {
@@ -21,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadThreatLevel();
             } else if (item.id === 'btn-health') {
                 loadSystemHealth();
+                healthPollInterval = setInterval(loadSystemHealth, 5000);
             }
         });
     });
@@ -51,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Controllers State Matrix
     let controllersMap = {}; // controller_id -> state details
+    let healthPollInterval = null;
     let eventsCache = [];    // Cached logs for filtering and CSV export
 
     // Load Initial Data

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -82,6 +83,9 @@ func main() {
 
 	// Start PG Notification Listener
 	go startPGListener(connStr)
+
+	// Start Controller Health Poller
+	go startControllerHealthPoller()
 
 	// Static Web Assets
 	fs := http.FileServer(http.Dir("./web"))
@@ -1174,5 +1178,110 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "saved", "push": pushStatus})
 	} else {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func startControllerHealthPoller() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+
+	for range ticker.C {
+		rows, err := dbConn.Query("SELECT controller_id, server_ip, token_hash FROM controllers")
+		if err != nil {
+			log.Printf("[HEALTH-POLLER-ERR] Failed to fetch controllers: %v", err)
+			continue
+		}
+
+		type Target struct {
+			ID    string
+			IP    string
+			Token string
+		}
+		var targets []Target
+		for rows.Next() {
+			var t Target
+			if err := rows.Scan(&t.ID, &t.IP, &t.Token); err == nil {
+				targets = append(targets, t)
+			}
+		}
+		rows.Close()
+
+		for _, t := range targets {
+			go func(tgt Target) {
+				start := time.Now()
+				addr := fmt.Sprintf("%s:8080", tgt.IP)
+				conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+				pingMs := int(time.Since(start).Milliseconds())
+
+				if err != nil {
+					_, dbErr := dbConn.Exec(`
+						UPDATE controllers 
+						SET is_online = false, last_ping_ms = 999, cpu_usage = 0, memory_usage = 0 
+						WHERE controller_id = $1`, tgt.ID)
+					if dbErr != nil {
+						log.Printf("[HEALTH-POLLER-ERR] Failed to update offline state: %v", dbErr)
+					}
+					return
+				}
+				conn.Close()
+
+				url := fmt.Sprintf("https://%s:8080/api/v1/health", tgt.IP)
+				req, reqErr := http.NewRequest("GET", url, nil)
+				if reqErr != nil {
+					dbConn.Exec(`
+						UPDATE controllers 
+						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						WHERE controller_id = $2`, pingMs, tgt.ID)
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+tgt.Token)
+
+				resp, respErr := client.Do(req)
+				if respErr != nil {
+					dbConn.Exec(`
+						UPDATE controllers 
+						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						WHERE controller_id = $2`, pingMs, tgt.ID)
+					return
+				}
+				defer resp.Body.Close()
+
+				if resp.StatusCode != http.StatusOK {
+					dbConn.Exec(`
+						UPDATE controllers 
+						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						WHERE controller_id = $2`, pingMs, tgt.ID)
+					return
+				}
+
+				var metrics struct {
+					CPUUsage     float64 `json:"cpu_usage"`
+					MemoryUsage  float64 `json:"memory_usage"`
+					BufferedLogs int     `json:"buffered_logs"`
+				}
+				if decodeErr := json.NewDecoder(resp.Body).Decode(&metrics); decodeErr != nil {
+					dbConn.Exec(`
+						UPDATE controllers 
+						SET is_online = true, last_ping_ms = $1, last_heartbeat = NOW() 
+						WHERE controller_id = $2`, pingMs, tgt.ID)
+					return
+				}
+
+				_, dbErr := dbConn.Exec(`
+					UPDATE controllers 
+					SET is_online = true, last_ping_ms = $1, cpu_usage = $2, memory_usage = $3, 
+					    buffered_logs = $4, last_heartbeat = NOW() 
+					WHERE controller_id = $5`, 
+					pingMs, metrics.CPUUsage, metrics.MemoryUsage, metrics.BufferedLogs, tgt.ID)
+				if dbErr != nil {
+					log.Printf("[HEALTH-POLLER-ERR] Failed to update healthy metrics: %v", dbErr)
+				}
+			}(t)
+		}
 	}
 }
