@@ -127,3 +127,33 @@ PiACS-EDGE is an enterprise-grade physical access control system (PACS) engineer
 - **Credentials (`credentials` & `users`)**: Holds active statuses and badge IDs.
 - **Access Logs (`access_logs`)**: Records `CARD_GRANT`, `DENY`, `DENY_SCHEDULE`, `DOOR_OPEN`, `DOOR_CLOSE`, `APB_VIOLATION`.
 - **System Alarms (`system_alarms`)**: Records active hardware breaches (`DFO`, `DHO`).
+
+---
+
+## Edge Controller Auto-Registration
+
+When a new PiACS-EDGE controller starts up, it automatically registers itself in the central PostgreSQL database if it is not already present.
+- **Dynamic IP Resolution**: The controller resolves its local outbound network IP interface dynamically on boot and reports it.
+- **Conflict Prevention**: If a controller record already exists in the `controllers` table, only the dynamic state fields (`server_ip`, `is_online`, `last_heartbeat`) are updated. The administrator's customized `friendly_name` and cryptographic `token_hash` are safely preserved.
+- **Cascading Seeding**: Once registered in the main `controllers` table, the Pi synchronizes its dynamic configuration payload directly into `controller_configs` without manual seeding steps.
+
+---
+
+## Network Configuration & Traversal Strategies
+
+To support deployment on diverse enterprise subnets, firewalls, and NAT environments, PiACS-EDGE is designed with several deployment models:
+
+### 1. Direct Routing (Standard Subnet)
+If both the Central Web Server (VM) and the Edge Controller (Pi) reside in routeable subnets:
+- **Pi to DB**: The Pi connects directly to PostgreSQL (`port 5432`).
+- **Server to Pi**: The Central Server proxies remote overrides (e.g. Remote Unlock, Lockdown) directly to the Pi's HTTPS server (`port 8080`).
+
+### 2. NAT/Firewall Traversal (Constrained Subnets)
+If the Pi is situated behind a NAT or firewalled private network where incoming connections to `port 8080` are blocked:
+- **Reverse SSH Tunnel**: Establish a reverse tunnel from the Pi to the Central Server. This directs traffic to localhost on the Central Server to the Pi's HTTPS API:
+  ```bash
+  ssh -R 8080:localhost:8080 -N user@central-server-ip
+  ```
+  Then, set the controller's IP address (`server_ip`) in the database to `127.0.0.1` (or local routing equivalents) so the Central Server communicates through the tunnel loopback.
+- **VPN / WireGuard**: Deploy a virtual private network (e.g., WireGuard or Tailscale) across all nodes. This establishes a secure, flat mesh network layout where all controllers and the central server can reach each other via routeable virtual IPs, regardless of local firewalls.
+

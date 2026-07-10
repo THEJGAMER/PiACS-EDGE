@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -283,6 +284,43 @@ func pushSystemHealthTelemetry() {
 	}
 }
 
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+	localAddr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return "127.0.0.1"
+	}
+	return localAddr.IP.String()
+}
+
+func autoRegisterController() {
+	if isOffline { return }
+	ip := getOutboundIP()
+	
+	// Register the controller if it doesn't exist, or update runtime IP/online status on conflict
+	_, err := dbConn.Exec(`
+		INSERT INTO controllers (controller_id, friendly_name, server_ip, is_online, last_heartbeat, token_hash)
+		VALUES ($1, $2, $3, true, NOW(), $4)
+		ON CONFLICT (controller_id) DO UPDATE SET
+			server_ip = EXCLUDED.server_ip,
+			is_online = true,
+			last_heartbeat = NOW()`,
+		runtimeState.ControllerID,
+		runtimeState.ControllerID + " (Auto-Registered)",
+		ip,
+		runtimeState.APIToken,
+	)
+	if err != nil {
+		edgeLogger.Printf("[DB-ERR] Auto-registration failed: %v\n", err)
+	} else {
+		edgeLogger.Printf("[DB-SYNC] Controller auto-registration completed successfully (IP: %s).\n", ip)
+	}
+}
+
 func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) {
 	if isOffline { return }
 	
@@ -535,6 +573,7 @@ func main() {
 		edgeLogger.Println("[DB-ONLINE] PostgreSQL Core Engine Connected.")
 		isOffline = false
 		
+		autoRegisterController()
 		pushLocalConfigToDatabaseReference(runtimeState.HardwareMapping, "BOOT_INITIALIZATION")
 		syncPostgresToSQLiteCache()
 		syncBufferedLogsToPostgres()
