@@ -112,6 +112,7 @@ func main() {
 	http.HandleFunc("/api/threat-level", handleThreatLevel)
 	http.HandleFunc("/api/system-health", handleSystemHealth)
 	http.HandleFunc("/api/map-placements", handleMapPlacements)
+	http.HandleFunc("/api/apb-status", handleAPBStatus)
 	http.HandleFunc("/api/auth/login", handleAuthLogin)
 	http.HandleFunc("/api/controller-config", requireAuth(handleControllerConfig))
 
@@ -658,17 +659,107 @@ func handleAccessLevels(w http.ResponseWriter, r *http.Request) {
 		tx.Commit()
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "id": alID})
+
+	} else if r.Method == http.MethodPut {
+		// Update existing access level
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			http.Error(w, "Missing id", http.StatusBadRequest)
+			return
+		}
+		alID, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, "Invalid id", http.StatusBadRequest)
+			return
+		}
+
+		var al AccessLevel
+		if err := json.NewDecoder(r.Body).Decode(&al); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		tx, err := dbConn.Begin()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = tx.Exec("UPDATE access_levels SET name = $1, dho_override = $2 WHERE id = $3", al.Name, al.DhoOverride, alID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Replace all mappings
+		_, err = tx.Exec("DELETE FROM access_level_time_zones WHERE access_level_id = $1", alID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, m := range al.Mappings {
+			if m.ReaderID != "" && m.TimeZoneID != 0 {
+				_, err = tx.Exec("INSERT INTO access_level_time_zones (access_level_id, reader_id, time_zone_id) VALUES ($1, $2, $3)",
+					alID, m.ReaderID, m.TimeZoneID)
+				if err != nil {
+					tx.Rollback()
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		tx.Commit()
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success"})
+
+	} else if r.Method == http.MethodDelete {
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			http.Error(w, "Missing id", http.StatusBadRequest)
+			return
+		}
+		alID, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, "Invalid id", http.StatusBadRequest)
+			return
+		}
+
+		tx, err := dbConn.Begin()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Remove credential links first to avoid FK violation
+		_, err = tx.Exec("DELETE FROM credential_access_levels WHERE access_level_id = $1", alID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = tx.Exec("DELETE FROM access_level_time_zones WHERE access_level_id = $1", alID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = tx.Exec("DELETE FROM access_levels WHERE id = $1", alID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		tx.Commit()
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
 }
 
 func handleControllers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	rows, err := dbConn.Query("SELECT controller_id, friendly_name, server_ip, is_online FROM controllers ORDER BY controller_id")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
 
 	type Controller struct {
 		ID           string `json:"controller_id"`
@@ -677,13 +768,69 @@ func handleControllers(w http.ResponseWriter, r *http.Request) {
 		IsOnline     bool   `json:"is_online"`
 	}
 
-	ctrls := []Controller{}
-	for rows.Next() {
+	if r.Method == http.MethodGet || r.Method == "" {
+		rows, err := dbConn.Query("SELECT controller_id, friendly_name, server_ip, is_online FROM controllers ORDER BY controller_id")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		ctrls := []Controller{}
+		for rows.Next() {
+			var c Controller
+			rows.Scan(&c.ID, &c.FriendlyName, &c.IP, &c.IsOnline)
+			ctrls = append(ctrls, c)
+		}
+		json.NewEncoder(w).Encode(ctrls)
+
+	} else if r.Method == http.MethodPost {
 		var c Controller
-		rows.Scan(&c.ID, &c.FriendlyName, &c.IP, &c.IsOnline)
-		ctrls = append(ctrls, c)
+		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if c.ID == "" || c.IP == "" {
+			http.Error(w, "controller_id and server_ip are required", http.StatusBadRequest)
+			return
+		}
+		if c.FriendlyName == "" {
+			c.FriendlyName = c.ID
+		}
+		_, err := dbConn.Exec(`INSERT INTO controllers (controller_id, friendly_name, server_ip, is_online, token_hash)
+			VALUES ($1, $2, $3, false, '')
+			ON CONFLICT (controller_id) DO UPDATE SET friendly_name = EXCLUDED.friendly_name, server_ip = EXCLUDED.server_ip`,
+			c.ID, c.FriendlyName, c.IP)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+
+	} else if r.Method == http.MethodDelete {
+		controllerID := r.URL.Query().Get("controller_id")
+		if controllerID == "" {
+			http.Error(w, "Missing controller_id", http.StatusBadRequest)
+			return
+		}
+		tx, err := dbConn.Begin()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Remove from dependent tables first
+		tx.Exec("DELETE FROM map_placements WHERE controller_id = $1", controllerID)
+		tx.Exec("DELETE FROM controller_configs WHERE controller_id = $1", controllerID)
+		tx.Exec("DELETE FROM access_level_time_zones WHERE reader_id = $1", controllerID)
+		_, err = tx.Exec("DELETE FROM controllers WHERE controller_id = $1", controllerID)
+		if err != nil {
+			tx.Rollback()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tx.Commit()
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
-	json.NewEncoder(w).Encode(ctrls)
 }
 
 func handleControllerCommand(w http.ResponseWriter, r *http.Request) {
@@ -946,27 +1093,37 @@ type MapPlacement struct {
 func handleMapPlacements(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
-		rows, err := dbConn.Query("SELECT controller_id, pos_x, pos_y FROM map_placements")
+		rows, err := dbConn.Query(`
+			SELECT mp.controller_id, mp.pos_x, mp.pos_y, c.friendly_name, c.is_online
+			FROM map_placements mp
+			JOIN controllers c ON mp.controller_id = c.controller_id`)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		defer rows.Close()
 
-		list := []MapPlacement{}
+		type RichPlacement struct {
+			ControllerID string  `json:"controller_id"`
+			PosX         float64 `json:"pos_x"`
+			PosY         float64 `json:"pos_y"`
+			FriendlyName string  `json:"friendly_name"`
+			IsOnline     bool    `json:"is_online"`
+		}
+		list := []RichPlacement{}
 		for rows.Next() {
-			var p MapPlacement
-			rows.Scan(&p.ControllerID, &p.PosX, &p.PosY)
+			var p RichPlacement
+			rows.Scan(&p.ControllerID, &p.PosX, &p.PosY, &p.FriendlyName, &p.IsOnline)
 			list = append(list, p)
 		}
 		json.NewEncoder(w).Encode(list)
+
 	} else if r.Method == http.MethodPost {
 		var p MapPlacement
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
 		_, err := dbConn.Exec(`
 			INSERT INTO map_placements (controller_id, pos_x, pos_y) 
 			VALUES ($1, $2, $3)
@@ -977,7 +1134,60 @@ func handleMapPlacements(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+
+	} else if r.Method == http.MethodDelete {
+		controllerID := r.URL.Query().Get("controller_id")
+		if controllerID == "" {
+			http.Error(w, "Missing controller_id", http.StatusBadRequest)
+			return
+		}
+		_, err := dbConn.Exec("DELETE FROM map_placements WHERE controller_id = $1", controllerID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 	}
+}
+
+// APB status: last seen controller per cardholder
+func handleAPBStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type APBEntry struct {
+		UserID           int       `json:"user_id"`
+		EmployeeName     string    `json:"employee_name"`
+		LastControllerID string    `json:"last_controller_id"`
+		LastEventType    string    `json:"last_event_type"`
+		LastSeen         time.Time `json:"last_seen"`
+		APBViolation     bool      `json:"apb_violation"`
+	}
+
+	rows, err := dbConn.Query(`
+		SELECT DISTINCT ON (ae.user_id)
+			ae.user_id, u.employee_name, ae.controller_id, ae.event_type, ae.event_timestamp,
+			ae.event_type = 'APB_VIOLATION' AS apb_violation
+		FROM access_events ae
+		JOIN users u ON ae.user_id = u.user_id
+		WHERE ae.event_type IN ('CARD_GRANT', 'APB_VIOLATION')
+		ORDER BY ae.user_id, ae.event_timestamp DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	entries := []APBEntry{}
+	for rows.Next() {
+		var e APBEntry
+		rows.Scan(&e.UserID, &e.EmployeeName, &e.LastControllerID, &e.LastEventType, &e.LastSeen, &e.APBViolation)
+		entries = append(entries, e)
+	}
+	json.NewEncoder(w).Encode(entries)
 }
 
 // ---- Authentication ----

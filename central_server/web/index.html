@@ -150,6 +150,7 @@
                         
                         <div style="display: flex; flex-direction: column; gap: 2rem;">
                             <form id="form-access-level" class="form-container" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 8px; max-width: 500px;">
+                                <input type="hidden" id="al-id" value="">
                                 <div class="form-group">
                                     <label for="al-name">Access Level Name</label>
                                     <input type="text" id="al-name" required placeholder="e.g. IT Staff 24/7">
@@ -164,11 +165,17 @@
                                     <input type="checkbox" id="al-dho-override">
                                     <label for="al-dho-override" style="margin: 0; font-size: 13px; font-weight: normal; color: #fff;">Bypass Door Held Open (DHO) Alarms</label>
                                 </div>
-                                <button type="submit" class="btn btn-submit" style="align-self: flex-start; padding: 0.6rem 1.5rem;">Create Access Level</button>
+                                <div style="display: flex; gap: 0.75rem; align-items: center;">
+                                    <button type="submit" id="btn-al-submit" class="btn btn-submit" style="padding: 0.6rem 1.5rem;">Create Access Level</button>
+                                    <button type="button" id="btn-al-cancel-edit" class="btn btn-secondary" style="display:none; padding: 0.6rem 1rem; font-size: 13px;">✕ Cancel Edit</button>
+                                </div>
                             </form>
 
                             <div class="list-container" style="max-height: none;">
-                                <h4>Configured Access Levels</h4>
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+                                    <h4 style="margin: 0;">Configured Access Levels</h4>
+                                    <input type="text" id="al-search" placeholder="&#128269; Filter by name or reader..." style="width: 260px; padding: 0.35rem 0.65rem; font-size: 13px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; outline: none;">
+                                </div>
                                 <table class="data-table" id="table-access-levels">
                                     <thead>
                                         <tr>
@@ -176,6 +183,7 @@
                                             <th>Access Level</th>
                                             <th>Reader Mappings</th>
                                             <th>DHO Bypass</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody></tbody>
@@ -345,43 +353,105 @@
                 </div>
             </section>
 
+            <!-- Register Controller Modal -->
+            <div id="modal-register-ctrl" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: none; align-items: center; justify-content: center;">
+                <div class="card glass" style="width: 420px; padding: 2rem; position: relative; border: 1px solid var(--border-color);">
+                    <h3 style="margin-bottom: 1rem;">Register New Controller</h3>
+                    <p class="subtitle" style="margin-bottom: 1.5rem;">Add a new edge controller node to the system. It will self-register on first heartbeat.</p>
+                    <form id="form-register-ctrl">
+                        <div class="form-group">
+                            <label for="reg-ctrl-id">Controller ID (unique)</label>
+                            <input type="text" id="reg-ctrl-id" required placeholder="e.g. LOBBY-1" style="text-transform: uppercase;">
+                        </div>
+                        <div class="form-group">
+                            <label for="reg-ctrl-name">Friendly Name</label>
+                            <input type="text" id="reg-ctrl-name" placeholder="e.g. Main Lobby Entry Reader">
+                        </div>
+                        <div class="form-group">
+                            <label for="reg-ctrl-ip">IP Address</label>
+                            <input type="text" id="reg-ctrl-ip" required placeholder="e.g. 192.168.1.201">
+                        </div>
+                        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+                            <button type="submit" class="btn btn-submit" style="flex: 1;">Register Controller</button>
+                            <button type="button" class="btn btn-secondary" id="btn-cancel-reg-ctrl" style="flex: 1;">Cancel</button>
+                        </div>
+                    </form>
+                    <div id="reg-ctrl-status" style="display: none; margin-top: 1rem; font-size: 13px;"></div>
+                </div>
+            </div>
+
             <!-- Portal Map View -->
             <section id="view-map" class="view-panel">
                 <div class="card glass">
-                    <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem;">
-                        <h3>Portal Floor Plan Map</h3>
-                        <p class="subtitle">Drag and place controllers onto the security layout map. Real-time door status indicators active.</p>
+                    <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem; display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                        <div>
+                            <h3>Portal Floor Plan Map</h3>
+                            <p class="subtitle">Drag controllers onto the security layout. Click a node for real-time controls.</p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                            <button class="btn btn-submit" id="btn-open-reg-ctrl" style="padding: 0.5rem 1rem; font-size: 13px;">➕ Register Controller</button>
+                        </div>
                     </div>
-                    <div class="map-container-wrapper" style="position: relative; background: radial-gradient(circle, #10121d 0%, #08090f 100%); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; width: 100%; height: 500px; display: flex; justify-content: center; align-items: center;">
-                        <!-- SVG Base blueprint grid layout -->
-                        <svg id="map-canvas" viewBox="0 0 1000 500" width="100%" height="100%" style="position: absolute; top: 0; left: 0; user-select: none;">
-                            <!-- Grid background -->
-                            <defs>
-                                <pattern id="map-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
-                                </pattern>
-                            </defs>
-                            <rect width="100%" height="100%" fill="url(#map-grid)" />
-                            
-                            <!-- Simple Blueprint Floor Plan Layout Lines -->
-                            <rect x="50" y="50" width="900" height="400" fill="none" stroke="rgba(255, 255, 255, 0.1)" stroke-width="4" rx="10"/>
-                            <!-- Inner room partitions -->
-                            <line x1="350" y1="50" x2="350" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
-                            <line x1="650" y1="50" x2="650" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
-                            <line x1="350" y1="200" x2="650" y2="200" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
-                            
-                            <!-- Texts for room names -->
-                            <text x="200" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Server Room</text>
-                            <text x="500" y="125" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Command Lobby</text>
-                            <text x="500" y="325" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Main Office</text>
-                            <text x="800" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Bedroom Area</text>
-                        </svg>
-                        
-                        <!-- Placed portal nodes will render dynamically via JS here -->
-                        <div id="map-nodes-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+
+                    <div style="display: flex; gap: 1rem; align-items: flex-start;">
+                        <!-- Left sidebar: Unplaced Controllers -->
+                        <div style="min-width: 200px; max-width: 200px; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem;">
+                            <div style="font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;">Unplaced Controllers</div>
+                            <div id="map-unplaced-list" style="display: flex; flex-direction: column; gap: 0.4rem; min-height: 40px;">
+                                <!-- Populated by JS -->
+                            </div>
+                            <div style="margin-top: 1rem; font-size: 11px; color: #555; line-height: 1.5;">Drag from here onto the map to place, or drag existing icons to reposition.</div>
+                        </div>
+
+                        <!-- Map Canvas area -->
+                        <div style="flex: 1; display: flex; flex-direction: column; gap: 0.75rem;">
+                            <div class="map-container-wrapper" style="position: relative; background: radial-gradient(circle, #10121d 0%, #08090f 100%); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; width: 100%; height: 500px;">
+                                <!-- SVG Base blueprint grid layout -->
+                                <svg id="map-canvas" viewBox="0 0 1000 500" width="100%" height="100%" style="position: absolute; top: 0; left: 0; user-select: none;">
+                                    <!-- Grid background -->
+                                    <defs>
+                                        <pattern id="map-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                                            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                                        </pattern>
+                                    </defs>
+                                    <rect width="100%" height="100%" fill="url(#map-grid)" />
+                                    
+                                    <!-- Simple Blueprint Floor Plan Layout Lines -->
+                                    <rect x="50" y="50" width="900" height="400" fill="none" stroke="rgba(255, 255, 255, 0.1)" stroke-width="4" rx="10"/>
+                                    <!-- Inner room partitions -->
+                                    <line x1="350" y1="50" x2="350" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                                    <line x1="650" y1="50" x2="650" y2="450" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                                    <line x1="350" y1="200" x2="650" y2="200" stroke="rgba(255, 255, 255, 0.1)" stroke-width="3"/>
+                                    
+                                    <!-- Texts for room names -->
+                                    <text x="200" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Server Room</text>
+                                    <text x="500" y="125" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Command Lobby</text>
+                                    <text x="500" y="325" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Main Office</text>
+                                    <text x="800" y="250" fill="rgba(255,255,255,0.2)" font-size="20" font-weight="bold" text-anchor="middle">Bedroom Area</text>
+                                </svg>
+                                
+                                <!-- Placed portal nodes will render dynamically via JS here -->
+                                <div id="map-nodes-container" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+                            </div>
+
+                            <!-- APB Occupancy Legend Panel -->
+                            <div style="background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+                                    <div style="font-size: 12px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.1em;">Anti-Passback & Cardholder Occupancy</div>
+                                    <div style="display: flex; gap: 1rem; font-size: 11px; color: #666;">
+                                        <span><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981; margin-right:4px;"></span>Last Seen (OK)</span>
+                                        <span><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#f97316; margin-right:4px;"></span>APB Violation</span>
+                                    </div>
+                                </div>
+                                <div id="apb-occupancy-list" style="display: flex; flex-wrap: wrap; gap: 0.5rem; min-height: 32px;">
+                                    <span style="color: #555; font-size: 12px;">No recent access events...</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>
+
 
             <!-- Threat Postures View -->
             <section id="view-threat" class="view-panel">

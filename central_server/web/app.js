@@ -18,11 +18,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInterval(healthPollInterval);
                 healthPollInterval = null;
             }
+            if (mapPollInterval) {
+                clearInterval(mapPollInterval);
+                mapPollInterval = null;
+            }
 
             if (item.id === 'btn-syslogs') {
                 loadControllerLogs();
             } else if (item.id === 'btn-map') {
                 loadMapPlacements();
+                mapPollInterval = setInterval(loadAPBOccupancy, 5000);
             } else if (item.id === 'btn-threat') {
                 loadThreatLevel();
             } else if (item.id === 'btn-health') {
@@ -788,16 +793,39 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Access Levels Management
+    let allAccessLevelsData = [];
+
     async function loadAccessLevels() {
         const res = await fetch('/api/access-levels');
         const data = await res.json();
-        const tbody = document.querySelector('#table-access-levels tbody');
+        allAccessLevelsData = data;
         const credContainer = document.getElementById('cred-access-levels-container');
-
-        tbody.innerHTML = '';
         credContainer.innerHTML = '';
-
         data.forEach(al => {
+            const lbl = document.createElement('label');
+            lbl.style.display = 'block';
+            lbl.style.marginBottom = '6px';
+            lbl.innerHTML = `
+                <input type="checkbox" name="cred-al" value="${al.id}">
+                <span style="font-weight: bold; color: #fff;">${al.name}</span>
+                <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
+            `;
+            credContainer.appendChild(lbl);
+        });
+        renderAccessLevels(data);
+    }
+
+    function renderAccessLevels(data) {
+        const tbody = document.querySelector('#table-access-levels tbody');
+        tbody.innerHTML = '';
+        const searchTerm = (document.getElementById('al-search')?.value || '').toLowerCase();
+
+        const filtered = searchTerm ? data.filter(al => {
+            const readersStr = al.mappings ? al.mappings.map(m => m.reader_id).join(' ') : '';
+            return al.name.toLowerCase().includes(searchTerm) || readersStr.toLowerCase().includes(searchTerm);
+        }) : data;
+
+        filtered.forEach(al => {
             const tr = document.createElement('tr');
             
             let mappingsHtml = '';
@@ -806,7 +834,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="margin-bottom: 4px;">
                         <span class="badge" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">${m.reader_id}</span>
                         <span style="color: #666; margin: 0 4px;">➔</span>
-                        <span style="color: var(--accent-color); font-weight: 500;">${m.timezone_name}</span>
+                        <span style="color: var(--accent-color); font-weight: 500;">${m.timezone_name || 'Any Time'}</span>
                     </div>
                 `).join('');
             } else {
@@ -822,23 +850,67 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="font-weight: bold; color: #fff;">${al.name}</td>
                 <td>${mappingsHtml}</td>
                 <td style="vertical-align: middle;">${dhoBadge}</td>
+                <td>
+                    <div style="display: flex; gap: 0.4rem;">
+                        <button class="btn btn-secondary btn-al-edit" data-id="${al.id}" style="padding: 0.25rem 0.55rem; font-size: 0.75rem;">✏️ Edit</button>
+                        <button class="btn btn-clear btn-al-delete" data-id="${al.id}" data-name="${al.name}" style="padding: 0.25rem 0.55rem; font-size: 0.75rem;">🗑️ Delete</button>
+                    </div>
+                </td>
             `;
-            tbody.appendChild(tr);
 
-            const lbl = document.createElement('label');
-            lbl.style.display = 'block';
-            lbl.style.marginBottom = '6px';
-            lbl.innerHTML = `
-                <input type="checkbox" name="cred-al" value="${al.id}">
-                <span style="font-weight: bold; color: #fff;">${al.name}</span>
-                <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
-            `;
-            credContainer.appendChild(lbl);
+            tr.querySelector('.btn-al-edit').addEventListener('click', () => startEditAccessLevel(al));
+            tr.querySelector('.btn-al-delete').addEventListener('click', () => deleteAccessLevel(al.id, al.name));
+
+            tbody.appendChild(tr);
         });
     }
 
+    function startEditAccessLevel(al) {
+        document.getElementById('al-id').value = al.id;
+        document.getElementById('al-name').value = al.name;
+        document.getElementById('al-dho-override').checked = al.dho_override;
+        document.getElementById('btn-al-submit').textContent = '💾 Update Access Level';
+        document.getElementById('btn-al-cancel-edit').style.display = 'inline-flex';
+
+        // Pre-check mappings
+        document.querySelectorAll('.mapping-chk').forEach(chk => {
+            const readerID = chk.getAttribute('data-reader-id');
+            const mapped = al.mappings ? al.mappings.find(m => m.reader_id === readerID) : null;
+            chk.checked = !!mapped;
+            if (mapped) {
+                const row = chk.closest('div').parentElement;
+                const tzSelect = row.querySelector('.mapping-tz');
+                if (tzSelect) tzSelect.value = mapped.time_zone_id;
+            }
+        });
+
+        document.getElementById('form-access-level').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function deleteAccessLevel(id, name) {
+        if (!confirm(`Delete access level "${name}"?\nThis will remove it from all assigned credentials.`)) return;
+        const res = await fetch(`/api/access-levels?id=${id}`, { method: 'DELETE' });
+        if (res.ok) {
+            loadAccessLevels();
+        } else {
+            const err = await res.text();
+            alert('Delete failed: ' + err);
+        }
+    }
+
+    document.getElementById('btn-al-cancel-edit').addEventListener('click', () => {
+        document.getElementById('al-id').value = '';
+        document.getElementById('form-access-level').reset();
+        document.getElementById('btn-al-submit').textContent = 'Create Access Level';
+        document.getElementById('btn-al-cancel-edit').style.display = 'none';
+        document.querySelectorAll('.mapping-chk').forEach(c => c.checked = false);
+    });
+
+    document.getElementById('al-search').addEventListener('input', () => renderAccessLevels(allAccessLevelsData));
+
     async function saveAccessLevel(e) {
         e.preventDefault();
+        const id = document.getElementById('al-id').value;
         const name = document.getElementById('al-name').value;
         const dhoOverride = document.getElementById('al-dho-override').checked;
 
@@ -860,16 +932,26 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const res = await fetch('/api/access-levels', {
-            method: 'POST',
+        const isEdit = id !== '';
+        const url = isEdit ? `/api/access-levels?id=${id}` : '/api/access-levels';
+        const method = isEdit ? 'PUT' : 'POST';
+
+        const res = await fetch(url, {
+            method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, dho_override: dhoOverride, mappings })
         });
 
         if (res.ok) {
+            document.getElementById('al-id').value = '';
             document.getElementById('form-access-level').reset();
+            document.getElementById('btn-al-submit').textContent = 'Create Access Level';
+            document.getElementById('btn-al-cancel-edit').style.display = 'none';
             document.querySelectorAll('.mapping-chk').forEach(c => c.checked = false);
             loadAccessLevels();
+        } else {
+            const err = await res.text();
+            alert('Save failed: ' + err);
         }
     }
     async function loadCredentials() {
@@ -1184,23 +1266,108 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Portal Map placements
     let mapPlacements = {};
+    let mapPollInterval = null;
 
     async function loadMapPlacements() {
         try {
-            const pres = await fetch('/api/map-placements');
-            const placements = await pres.json();
+            // Single enriched call — returns friendly_name + is_online per placement
+            const [placementsRes, controllersRes] = await Promise.all([
+                fetch('/api/map-placements'),
+                fetch('/api/controllers')
+            ]);
+            const placements = await placementsRes.json();
+            const allControllers = await controllersRes.json();
+
             mapPlacements = {};
+            const placedIDs = new Set();
             placements.forEach(p => {
                 mapPlacements[p.controller_id] = { x: p.pos_x, y: p.pos_y };
+                placedIDs.add(p.controller_id);
             });
 
-            const cres = await fetch('/api/controllers');
-            const controllers = await cres.json();
+            // Unplaced sidebar
+            const unplacedList = document.getElementById('map-unplaced-list');
+            unplacedList.innerHTML = '';
+            const unplaced = allControllers.filter(c => !placedIDs.has(c.controller_id));
+            if (unplaced.length === 0) {
+                unplacedList.innerHTML = '<span style="color:#555;font-size:12px;">All controllers placed.</span>';
+            } else {
+                unplaced.forEach(ctrl => {
+                    const item = document.createElement('div');
+                    item.style.cssText = 'padding: 0.35rem 0.5rem; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: 5px; font-size: 12px; cursor: grab; user-select: none; display: flex; align-items: center; gap: 0.4rem;';
+                    item.innerHTML = `<span style="opacity:0.6;">🚪</span> <span style="flex:1;">${ctrl.friendly_name}</span>`;
+                    item.title = `Drag to place ${ctrl.friendly_name}`;
+                    item.draggable = true;
+                    item.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.setData('controller_id', ctrl.controller_id);
+                    });
+                    unplacedList.appendChild(item);
+                });
+            }
 
-            renderMapNodes(controllers);
+            // Map canvas drop zone for unplaced controllers
+            const mapWrapper = document.querySelector('.map-container-wrapper');
+            mapWrapper.ondragover = (e) => e.preventDefault();
+            mapWrapper.ondrop = async (e) => {
+                e.preventDefault();
+                const ctrlId = e.dataTransfer.getData('controller_id');
+                if (!ctrlId) return;
+                const rect = mapWrapper.getBoundingClientRect();
+                const x = Math.round(e.clientX - rect.left - 20);
+                const y = Math.round(e.clientY - rect.top - 20);
+                await fetch('/api/map-placements', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ controller_id: ctrlId, pos_x: x, pos_y: y })
+                });
+                loadMapPlacements();
+            };
+
+            renderMapNodes(allControllers);
+
+            // Load APB occupancy
+            loadAPBOccupancy();
         } catch (err) {
             console.error('Failed to load map placements:', err);
         }
+    }
+
+    async function loadAPBOccupancy() {
+        try {
+            const res = await fetch('/api/apb-status');
+            if (!res.ok) return;
+            const data = await res.json();
+            const listEl = document.getElementById('apb-occupancy-list');
+            if (!data || data.length === 0) {
+                listEl.innerHTML = '<span style="color: #555; font-size: 12px;">No recent access events...</span>';
+                return;
+            }
+            listEl.innerHTML = '';
+            data.forEach(entry => {
+                const chip = document.createElement('div');
+                const dotColor = entry.apb_violation ? '#f97316' : '#10b981';
+                const timeDiff = Math.round((Date.now() - new Date(entry.last_seen).getTime()) / 60000);
+                const timeStr = timeDiff < 60 ? `${timeDiff}m ago` : `${Math.round(timeDiff/60)}h ago`;
+                chip.style.cssText = `display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: rgba(255,255,255,0.04); border: 1px solid ${entry.apb_violation ? 'rgba(249,115,22,0.3)' : 'rgba(255,255,255,0.08)'}; border-radius: 20px; font-size: 12px;`;
+                chip.innerHTML = `
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dotColor};flex-shrink:0;"></span>
+                    <span style="font-weight:600;color:#fff;">${entry.employee_name}</span>
+                    <span style="color:#666;">→ ${entry.last_controller_id}</span>
+                    <span style="color:#555;font-size:11px;">${timeStr}</span>
+                    ${entry.apb_violation ? '<span style="color:#f97316;font-size:11px;font-weight:bold;">⚠ APB</span>' : ''}
+                `;
+                // Highlight the node on the map
+                const mapNode = document.getElementById(`map-node-${entry.last_controller_id}`);
+                if (mapNode) {
+                    if (entry.apb_violation) {
+                        mapNode.style.boxShadow = '0 0 0 4px rgba(249,115,22,0.5)';
+                    } else {
+                        mapNode.style.boxShadow = '0 0 0 3px rgba(16,185,129,0.4)';
+                    }
+                }
+                listEl.appendChild(chip);
+            });
+        } catch (err) { /* APB is optional, fail silently */ }
     }
 
     function renderMapNodes(controllers) {
@@ -1208,13 +1375,15 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = '';
 
         controllers.forEach(ctrl => {
+            if (!mapPlacements[ctrl.controller_id]) return; // only render placed controllers
+
             const node = document.createElement('div');
             node.className = 'map-door-node';
             node.id = `map-node-${ctrl.controller_id}`;
             node.innerHTML = `🚪`;
             node.title = `${ctrl.friendly_name} (${ctrl.controller_id})`;
 
-            const pos = mapPlacements[ctrl.controller_id] || { x: 100, y: 100 };
+            const pos = mapPlacements[ctrl.controller_id];
             node.style.left = `${pos.x}px`;
             node.style.top = `${pos.y}px`;
 
@@ -1234,11 +1403,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 popover.className = 'map-popover';
                 popover.innerHTML = `
                     <h5>${ctrl.friendly_name}</h5>
+                    <div style="font-size:11px;color:#888;margin-bottom:0.5rem;">${ctrl.controller_id} · ${ctrl.is_online ? '🟢 Online' : '🔴 Offline'}</div>
                     <div class="map-popover-buttons">
                         <button class="btn btn-grant btn-pop-unlock">Unlock</button>
                         <button class="btn btn-lockdown btn-pop-lockdown">Lockdown</button>
                         <button class="btn btn-sustain btn-pop-sustain">Sustain</button>
                         <button class="btn btn-clear btn-pop-clear">Clear</button>
+                    </div>
+                    <div style="margin-top:0.5rem;border-top:1px solid rgba(255,255,255,0.07);padding-top:0.5rem;">
+                        <button class="btn btn-pop-remove" style="width:100%;font-size:11px;padding:0.25rem;background:rgba(255,50,50,0.1);border:1px solid rgba(255,50,50,0.2);color:#f87171;">🗑 Remove from Map</button>
                     </div>
                 `;
 
@@ -1246,6 +1419,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 popover.querySelector('.btn-pop-lockdown').addEventListener('click', () => sendCommand(ctrl.controller_id, 'FORCE_LOCK'));
                 popover.querySelector('.btn-pop-sustain').addEventListener('click', () => sendCommand(ctrl.controller_id, 'SUSTAIN_OPEN'));
                 popover.querySelector('.btn-pop-clear').addEventListener('click', () => sendCommand(ctrl.controller_id, 'CLEAR_ALARMS'));
+                popover.querySelector('.btn-pop-remove').addEventListener('click', async () => {
+                    await fetch(`/api/map-placements?controller_id=${ctrl.controller_id}`, { method: 'DELETE' });
+                    loadMapPlacements();
+                });
 
                 node.appendChild(popover);
             });
@@ -1305,6 +1482,62 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
     }
+
+    // Register Controller Modal handlers
+    document.getElementById('btn-open-reg-ctrl').addEventListener('click', () => {
+        const modal = document.getElementById('modal-register-ctrl');
+        modal.style.display = 'flex';
+    });
+
+    document.getElementById('btn-cancel-reg-ctrl').addEventListener('click', () => {
+        document.getElementById('modal-register-ctrl').style.display = 'none';
+        document.getElementById('form-register-ctrl').reset();
+        document.getElementById('reg-ctrl-status').style.display = 'none';
+    });
+
+    document.getElementById('form-register-ctrl').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const statusEl = document.getElementById('reg-ctrl-status');
+        const controller_id = document.getElementById('reg-ctrl-id').value.toUpperCase().trim();
+        const friendly_name = document.getElementById('reg-ctrl-name').value.trim() || controller_id;
+        const server_ip = document.getElementById('reg-ctrl-ip').value.trim();
+
+        statusEl.style.display = 'block';
+        statusEl.style.color = '#4ecdc4';
+        statusEl.textContent = 'Registering controller...';
+
+        try {
+            const res = await fetch('/api/controllers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ controller_id, friendly_name, server_ip })
+            });
+            if (res.ok) {
+                statusEl.style.color = '#2ecc71';
+                statusEl.textContent = `✅ Controller "${friendly_name}" registered! Drag it from the sidebar onto the map.`;
+                document.getElementById('form-register-ctrl').reset();
+                setTimeout(() => {
+                    document.getElementById('modal-register-ctrl').style.display = 'none';
+                    statusEl.style.display = 'none';
+                    loadMapPlacements();
+                }, 2000);
+            } else {
+                const err = await res.text();
+                statusEl.style.color = '#ff4444';
+                statusEl.textContent = '❌ Error: ' + err;
+            }
+        } catch (err) {
+            statusEl.style.color = '#ff4444';
+            statusEl.textContent = '❌ Network error: ' + err.message;
+        }
+    });
+
+    // Dismiss modal on backdrop click
+    document.getElementById('modal-register-ctrl').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('modal-register-ctrl')) {
+            document.getElementById('modal-register-ctrl').style.display = 'none';
+        }
+    });
 
     // Crisis Threat Level Postures
     async function loadThreatLevel() {
