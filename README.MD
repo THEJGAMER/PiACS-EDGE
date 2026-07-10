@@ -1,12 +1,10 @@
 # PiACS-EDGE: Physical Access Control System Edge & Enterprise Management Platform
 
-PiACS-EDGE is an enterprise-grade physical access control system (PACS) engineered for distributed target execution. It contains two main components:
-1. **PiACS-EDGE Engine (Edge Node)**: An autonomous controller written in Go that runs directly on a Raspberry Pi, interfacing with card readers, strike relays, and sensors over Linux's dynamic GPIO character device interface. It features local SQLite database failover survivability.
-2. **PiACS Management Console (Central Server)**: A high-performance central Go web server and dark-themed, glassmorphic Single Page Application (SPA) dashboard that provides real-time event telemetry (swipes, door status, DFO/DHO alarms) via WebSockets/SSE and supports timezone schedule mapping, holiday calendars, and sitewide command overrides.
+PiACS-EDGE is an enterprise-grade Physical Access Control System (PACS) engineered for distributed edge execution, local resilience, and centralized management. 
 
 ---
 
-## Architectural Layout
+## 1. Architectural Layout
 
 ```
                          +-----------------------------------+
@@ -34,126 +32,290 @@ PiACS-EDGE is an enterprise-grade physical access control system (PACS) engineer
 
 ---
 
-## Key Features
+## 2. Advanced Network Deployment & Traversal Strategies
 
-1. **Autonomous Failover Survivability**:
-   - **Online Mode**: Swipes are fully evaluated against PostgreSQL, checking user active posture, timezone active hours, and holiday schedules using the database server's time zone.
-   - **Offline Mode**: If the PostgreSQL network is lost, the Pi seamlessly falls back to the internal `edge_cache.db` (SQLite) database cache to process swipes using basic active/inactive validation to guarantee perimeter uptime.
-2. **Dynamic Timezones & Holidays Calendar**:
-   - Normalized relational tables allow configuring time windows for weekdays (0-6) and holiday exceptions (day type 7).
-   - Swiping during a holiday requires the credential to hold a Holiday-specific timezone override interval, preventing un-escorted access during closed schedules.
-3. **Real-time Push Telemetry**:
-   - PostgreSQL triggers fire `NOTIFY` events immediately upon log insertions.
-   - The central web server listens using `pq.Listener` and streams log records instantly to the frontend using Server-Sent Events (SSE), eliminating browser polling latency.
-4. **Sitewide and Local Directives**:
-   - Support for triggering actions (Remote Unlock, Emergency Lockdown, Clear Alarm Siren) on individual doors or concurrently across all active nodes in the facility.
-5. **Interactive Door Visualizer & Console**:
-   - SVG visual representations of doors that swing open, secure, or blink red dynamically in response to state transitions (open/closed) and alarms (Door Forced Open - DFO, Door Held Open - DHO, Anti-Passback - APB).
-   - Searchable audit logs with CSV exporting capabilities.
+To support deployment across diverse enterprise topologies, subnets, firewalls, and isolated dynamic IP boundaries, PiACS-EDGE supports three distinct networking models.
 
----
+### Deployment Model A: Direct Routing (Standard Subnet)
+Used when the Central Management Server and all Edge Controllers reside in routeable subnets with no blockages on standard communication ports.
 
-## Setup & Deployment Guide
-
-### Prerequisites
-- **Raspberry Pi**: Running a Debian-based OS (ARM64) with `go` (v1.24.4+ recommended) and `openssl`.
-- **Database Server**: PostgreSQL database instance.
-- **Frontend Server**: Standard Linux VM (x86_64 or ARM64) to serve the management portal.
+```
++------------------------------------+              +------------------------------------+
+|       Central Server VM            |              |      Edge Node (Raspberry Pi)      |
+|       IP: 192.168.0.140            |              |      IP: 192.168.1.200             |
+|  - REST/SSE Server (Port 8000)     |<============>|  - HTTPS Override API (Port 8080)   |
+|  - PostgreSQL DB (Port 5432)       |              |  - Local Hardware Engine           |
++------------------------------------+              +------------------------------------+
+```
+* **Traffic Flow (Node -> DB)**: Edge nodes query the central PostgreSQL instance directly via TCP `5432`.
+* **Traffic Flow (Server -> Node)**: The central server issues command overrides (Remote Unlock, Lockdown, config sync) by sending secure HTTPS requests directly to the edge node's API at `https://192.168.1.200:8080`.
 
 ---
 
-### Step 1: Database Setup (ACS-DB)
-1. Log in to your PostgreSQL instance and create the security database:
-   ```sql
-   CREATE DATABASE piacs_security;
-   ```
-2. Apply the database schemas defined in `db_schema_schedules.sql`:
+### Deployment Model B: Secure NAT / Firewall Traversal (Reverse SSH Tunnel)
+Used when Edge Controllers are placed behind strict local NAT routers or firewalls that prevent incoming connections to `port 8080` (preventing central server override requests), while outgoing TCP ports are allowed.
+
+```
++------------------------------------+              +------------------------------------+
+|       Central Server VM            |              |      Edge Node (Raspberry Pi)      |
+|       Public IP: 192.168.0.140     |              |      Private IP (NAT): 10.0.8.4    |
+|                                    |              |                                    |
+|   Receives Tunnel on Port 18080    |<=============|--- Establishes outbound SSH tunnel |
+|   (Proxies to Pi's port 8080)      |              |    to root@192.168.0.140           |
++------------------------------------+              +------------------------------------+
+```
+
+#### Step 1: Configure sshd on the Central Server
+Ensure gateway ports are allowed so loopback bindings are reachable. In `/etc/ssh/sshd_config` on the Central Server:
+```text
+GatewayPorts yes
+ClientAliveInterval 30
+ClientAliveCountMax 3
+```
+Then restart the SSH service: `sudo systemctl restart ssh`
+
+#### Step 2: Configure systemd Tunnel Service on the Edge Node (Pi)
+Create `/etc/systemd/system/piacs-tunnel.service` on the edge node to automatically maintain the connection:
+```ini
+[Unit]
+Description=PiACS-EDGE Reverse SSH Tunnel Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -N -R 18080:localhost:8080 root@192.168.0.140
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+Enable and start the tunnel on the Pi:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable piacs-tunnel.service
+sudo systemctl start piacs-tunnel.service
+```
+
+#### Step 3: Register the Controller
+On the management dashboard, register the controller with the loopback routing address as its server IP:
+* **Controller ID**: `EDGE-NODE-01`
+* **IP Address**: `127.0.0.1:18080` (The central server will target its local port `18080` which routes directly through the tunnel to the Pi's port `8080`).
+
+---
+
+### Deployment Model C: Flat Virtual Mesh Network (WireGuard VPN)
+Used when deploying controllers across multiple remote, dynamic IP networks. This is the **most secure** and robust architecture for enterprise environments.
+
+```
+       +-------------------------------------------------------------+
+       |                        WireGuard VPN                        |
+       |                        Subnet: 10.8.0.0/24                  |
+       +-------------------------------------------------------------+
+                            /                           \
+                           v                             v
+            +-----------------------------+       +-----------------------------+
+            |      Central Server VM      |       |    Edge Node (Raspberry Pi) |
+            |      Virtual IP: 10.8.0.1   |       |    Virtual IP: 10.8.0.2     |
+            +-----------------------------+       +-----------------------------+
+```
+
+#### Central Server WireGuard Setup (`/etc/wireguard/wg0.conf`)
+```ini
+[Interface]
+PrivateKey = <CENTRAL_SERVER_PRIVATE_KEY>
+Address = 10.8.0.1/24
+ListenPort = 51820
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+# Edge Node 1
+[Peer]
+PublicKey = <EDGE_NODE_01_PUBLIC_KEY>
+AllowedIPs = 10.8.0.2/32
+```
+
+#### Edge Node WireGuard Setup (`/etc/wireguard/wg0.conf`)
+```ini
+[Interface]
+PrivateKey = <EDGE_NODE_01_PRIVATE_KEY>
+Address = 10.8.0.2/24
+
+[Peer]
+PublicKey = <CENTRAL_SERVER_PUBLIC_KEY>
+Endpoint = 192.168.0.140:51820
+AllowedIPs = 10.8.0.0/24
+Keepalive = 25
+```
+Start WireGuard on both endpoints: `sudo wg-quick up wg0`
+
+#### Configuration Mapping:
+* **Central Database Host** (in the Pi's `config.json`): Set to `10.8.0.1` (the database is reached via the secure VPN address).
+* **Controller IP Address** (on the Central Dashboard): Set to `10.8.0.2` (the override API is invoked via the secure VPN address).
+
+---
+
+## 3. Core System Architecture & Event Loops
+
+### A. Autonomous Evaluation & SQLite Caching Flow (Node Uptime Uptime)
+
+When a cardholder swipes their badge, the local dynamic controller follows a strict failover hierarchy to guarantee access authorization even during a complete network or database outage.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Cardholder (Swipe)
+    participant HW as Wiegand Reader (GPIO)
+    participant E as PiACS-EDGE Engine
+    participant DB as Central PostgreSQL
+    participant L as Local SQLite Cache
+    participant R as Door Lock Relay
+
+    User->>HW: Swipe Card (Data0 / Data1 stream)
+    HW->>E: GPIO Pin Interrupts triggered
+    E->>E: Parse Wiegand bitstream (Card ID / Facility Code)
+    
+    alt Central Database is Reachable (ONLINE MODE)
+        E->>DB: Query authorization schemas (Timezones/Schedules/Holidays)
+        DB-->>E: Returns Auth Status (GRANTED / DENIED)
+        
+        alt Authorization GRANTED
+            E->>R: Pulse Lock Relay (Open Door)
+            E->>DB: Write event Log "CARD_GRANT"
+        else Authorization DENIED
+            E->>DB: Write event Log "DENY_SCHEDULE" or "DENY"
+        end
+        
+    else Central Database Offline (OFFLINE FALLBACK MODE)
+        E->>E: Detect PostgreSQL Connection Timeout
+        E->>L: Query offline cache database (edge_cache.db)
+        L-->>E: Returns Local Active Status
+        
+        alt User is ACTIVE in local cache
+            E->>R: Pulse Lock Relay (Open Door)
+            E->>L: Queue event log in local buffer tables
+        else User is INACTIVE / Absent
+            E->>L: Queue deny event log in local buffer tables
+        end
+    end
+```
+
+#### Offline Logging Queue & Dynamic Upload Sync
+While the edge node is offline, event records are logged directly inside the local SQLite database. Once the network is restored, a background worker thread (`syncBufferedLogsToPostgres`) executes:
+1. Queries all unsynced logs inside the local SQLite queue.
+2. Performs a batch insertion transaction to push them to the central PostgreSQL database.
+3. Deletes successfully pushed rows from the local SQLite queue.
+
+Similarly, a background caching thread (`syncPostgresToSQLiteCache`) pulls database records from PostgreSQL hourly and overwrites `edge_cache.db` to keep localized validation credentials fresh.
+
+---
+
+### B. Real-time Live Event Telemetry Loop
+
+The dashboard updates instantly when events occur, eliminating the need for periodic HTTP polling.
+
+```mermaid
+graph TD
+    A[Card Swipe or Sensor Alert] -->|Edge Node Event| B(PostgreSQL DB Insert)
+    B -->|Database Commit| C{Triggers fired}
+    C -->|INSERT ON access_logs| D[notify_access_event trigger]
+    C -->|INSERT ON system_alarms| D
+    D -->|pg_notify payload| E[PostgreSQL Listen channel: access_event]
+    E -->|pq.Listener notified| F[Central Go Server]
+    F -->|Multiplex Event| G[SSE Client Streams: /api/events/stream]
+    G -->|Server-Sent Events| H[Web Browser SPA Dashboard]
+    H -->|Dynamic JS DOM repaint| I[Update door icons, alarm cards, audit logs]
+```
+
+---
+
+### C. Edge Controller Auto-Registration
+
+Adding a new controller requires zero manual SQL database queries or prepopulated schemas.
+
+```
+[New Edge Node boots up]
+          │
+          ▼
+Get outbound network interface IP dynamically
+          │
+          ▼
+Connects to PostgreSQL database
+          │
+          ▼
+Check: Does controller_id exist in table "controllers"?
+         ├─── YES ───► Update transient state only (server_ip, is_online, last_heartbeat)
+         └─── NO  ───► Insert new row with default name & server_ip
+                         │
+                         ▼
+                       Insert default pin map schemas into "controller_configs"
+```
+
+---
+
+## 4. Hardware Configuration & Wiring Specs
+
+The edge engine utilizes the native Linux GPIO character device interface (`/dev/gpiochip*`) via the `gpiocdev` framework for direct, real-time peripheral control.
+
+### Default GPIO Pin Out Mapping (Configurable in `config.json`)
+
+| Peripheral Component | Pin Mapping | Type | Connection Notes |
+|:---|:---:|:---:|:---|
+| **Wiegand Data 0 (D0)** | GPIO 14 | Input | Pulse line for 0 bits |
+| **Wiegand Data 1 (D1)** | GPIO 15 | Input | Pulse line for 1 bits |
+| **Lock Strike Relay** | GPIO 18 | Output | High triggers transistor/driver to activate lock |
+| **Reader Red LED** | GPIO 23 | Output | Controls reader LED status feedback |
+| **Reader Green LED** | GPIO 24 | Output | Controls green grant feedback |
+| **Reader Buzzer** | GPIO 25 | Output | Audio notification driver |
+| **Door Status Monitor (DSM)** | GPIO 8 | Input | Detects door closed (Normally Closed sensor recommended) |
+| **Request to Exit (REX)** | GPIO 7 | Input | Motion sensor or push button input |
+| **Alarm Siren Horn** | GPIO 12 | Output | High engages external security siren relay |
+
+### Physical Peripheral Wiring Overview
+
+```text
+               +----------------------------------------+
+               |         Raspberry Pi Edge Node         |
+               +----------------------------------------+
+                  |    |     |      |     |     |     |
+            14(In) 15(In) 18(Out) 23(Out) 24(Out) 8(In)  7(In)
+              |      |     |      |     |     |     |
+              |      |     |      |     |     |     +--- [ REX Exit Button ]
+              |      |     |      |     |     +--------- [ DSM Door Sensor ]
+              |      |     |      |     +--------------- [ Green Reader LED ]
+              |      |     |      +--------------------- [ Red Reader LED ]
+              |      +---------------------------- [ Lock Relay Board ]
+              |      +---------------------------------- [ Card Reader Wiegand D1 ]
+              +----------------------------------------- [ Card Reader Wiegand D0 ]
+```
+
+> [!IMPORTANT]
+> Ensure common ground (GND) is shared between the Raspberry Pi, the external Wiegand reader power supply, and the relay boards to prevent floating voltage references.
+
+---
+
+## 5. Quick Installation & Execution Guide
+
+### Central Server Deployment (ACS-FRONTEND)
+1. Initialize the PostgreSQL schemas:
    ```bash
    psql -d piacs_security -f db_schema_schedules.sql
-   ```
-3. Apply the real-time notification triggers defined in `triggers.sql`:
-   ```bash
+   psql -d piacs_security -f db_schema_lenels2.sql
    psql -d piacs_security -f triggers.sql
    ```
-
----
-
-### Step 2: Edge Node Setup (Raspberry Pi)
-1. Transfer the codebase to the Pi (e.g. `/home/admin/PiACS-EDGE`).
-2. Generate local self-signed TLS certificates for the secure override API:
+2. Build and run the server:
    ```bash
-   openssl req -x509 -newkey rsa:2048 -keyout server.key -out server.crt -sha256 -days 3650 -nodes -subj "/CN=192.168.1.200"
+   cd central_server
+   go build -o central-server .
+   ./central-server
    ```
-3. Update `config.json` to configure the target database connection, API security tokens, and hardware pin mappings.
-4. Compile the engine directly on the Pi:
+
+### Edge Controller Deployment (Raspberry Pi)
+1. Build the local engine (CGO is required for the SQLite driver):
    ```bash
    CGO_ENABLED=1 go build -ldflags="-s -w" -o piacs-edge-engine .
    ```
-5. Deploy as a background systemd service:
-   - Copy `piacs-edge.service` to `/etc/systemd/system/piacs-edge.service`.
-   - Reload systemd and start the daemon:
-     ```bash
-     sudo systemctl daemon-reload
-     sudo systemctl enable piacs-edge.service
-     sudo systemctl start piacs-edge.service
-     ```
-
----
-
-### Step 3: Central Server & Frontend Setup
-1. From the repository root, compile the central server binary:
+2. Run the executable:
    ```bash
-   go build -o central-server central_server/server.go
+   sudo ./piacs-edge-engine
    ```
-2. Transfer the `central-server` binary and the `central_server/web` folder to the frontend host (e.g. `/root/`).
-3. Deploy as a background systemd service:
-   - Copy `central-server.service` to `/etc/systemd/system/central-server.service`.
-   - Reload and start:
-     ```bash
-     sudo systemctl daemon-reload
-     sudo systemctl enable central-server.service
-     sudo systemctl start central-server.service
-     ```
-4. Access the administration portal via your web browser at `http://<FRONTEND_IP>:8000`.
-
----
-
-## Technical Specifications & DB Schemas
-
-- **Holidays Table (`holidays`)**: Holds date exceptions (`holiday_date DATE PRIMARY KEY`).
-- **Time Zones Table (`time_zones`)**: Named schedules.
-- **Intervals Table (`time_zone_intervals`)**: Defines start/end windows for weekdays (0-6) and holidays (7).
-- **Access Level Time Zones (`access_level_time_zones`)**: Maps access levels to readers and timezones.
-- **Credentials (`credentials` & `users`)**: Holds active statuses and badge IDs.
-- **Access Logs (`access_logs`)**: Records `CARD_GRANT`, `DENY`, `DENY_SCHEDULE`, `DOOR_OPEN`, `DOOR_CLOSE`, `APB_VIOLATION`.
-- **System Alarms (`system_alarms`)**: Records active hardware breaches (`DFO`, `DHO`).
-
----
-
-## Edge Controller Auto-Registration
-
-When a new PiACS-EDGE controller starts up, it automatically registers itself in the central PostgreSQL database if it is not already present.
-- **Dynamic IP Resolution**: The controller resolves its local outbound network IP interface dynamically on boot and reports it.
-- **Conflict Prevention**: If a controller record already exists in the `controllers` table, only the dynamic state fields (`server_ip`, `is_online`, `last_heartbeat`) are updated. The administrator's customized `friendly_name` and cryptographic `token_hash` are safely preserved.
-- **Cascading Seeding**: Once registered in the main `controllers` table, the Pi synchronizes its dynamic configuration payload directly into `controller_configs` without manual seeding steps.
-
----
-
-## Network Configuration & Traversal Strategies
-
-To support deployment on diverse enterprise subnets, firewalls, and NAT environments, PiACS-EDGE is designed with several deployment models:
-
-### 1. Direct Routing (Standard Subnet)
-If both the Central Web Server (VM) and the Edge Controller (Pi) reside in routeable subnets:
-- **Pi to DB**: The Pi connects directly to PostgreSQL (`port 5432`).
-- **Server to Pi**: The Central Server proxies remote overrides (e.g. Remote Unlock, Lockdown) directly to the Pi's HTTPS server (`port 8080`).
-
-### 2. NAT/Firewall Traversal (Constrained Subnets)
-If the Pi is situated behind a NAT or firewalled private network where incoming connections to `port 8080` are blocked:
-- **Reverse SSH Tunnel**: Establish a reverse tunnel from the Pi to the Central Server. This directs traffic to localhost on the Central Server to the Pi's HTTPS API:
-  ```bash
-  ssh -R 8080:localhost:8080 -N user@central-server-ip
-  ```
-  Then, set the controller's IP address (`server_ip`) in the database to `127.0.0.1` (or local routing equivalents) so the Central Server communicates through the tunnel loopback.
-- **VPN / WireGuard**: Deploy a virtual private network (e.g., WireGuard or Tailscale) across all nodes. This establishes a secure, flat mesh network layout where all controllers and the central server can reach each other via routeable virtual IPs, regardless of local firewalls.
-
