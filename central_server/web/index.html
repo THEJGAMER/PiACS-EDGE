@@ -155,14 +155,14 @@
                                     <input type="text" id="al-name" required placeholder="e.g. IT Staff 24/7">
                                 </div>
                                 <div class="form-group">
-                                    <label for="al-reader">Target Reader/Door</label>
-                                    <select id="al-reader" required>
-                                        <!-- Loaded dynamically -->
-                                    </select>
+                                    <label>Reader & Time Zone Mappings</label>
+                                    <div id="al-mappings-container" style="display: flex; flex-direction: column; gap: 0.5rem; background: rgba(0,0,0,0.15); padding: 1rem; border-radius: 6px; border: 1px solid var(--border-color); max-height: 250px; overflow-y: auto;">
+                                        <!-- Rendered dynamically -->
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label for="al-timezone">Associated Time Zone</label>
-                                    <select id="al-timezone" required></select>
+                                <div class="form-group checkbox-group" style="display: flex; align-items: center; gap: 8px; margin-bottom: 1.5rem;">
+                                    <input type="checkbox" id="al-dho-override">
+                                    <label for="al-dho-override" style="margin: 0; font-size: 13px; font-weight: normal; color: #fff;">Bypass Door Held Open (DHO) Alarms</label>
                                 </div>
                                 <button type="submit" class="btn btn-submit" style="align-self: flex-start; padding: 0.6rem 1.5rem;">Create Access Level</button>
                             </form>
@@ -174,8 +174,8 @@
                                         <tr>
                                             <th>ID</th>
                                             <th>Access Level</th>
-                                            <th>Reader</th>
-                                            <th>Time Zone</th>
+                                            <th>Reader Mappings</th>
+                                            <th>DHO Bypass</th>
                                         </tr>
                                     </thead>
                                     <tbody></tbody>

@@ -137,6 +137,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Controllers State Matrix
     let controllersMap = {}; // controller_id -> state details
+    let globalControllers = [];
+    let globalTimezones = [];
     let healthPollInterval = null;
     let eventsCache = [];    // Cached logs for filtering and CSV export
     let credentialsCache = [];
@@ -170,17 +172,71 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('log-search').addEventListener('input', renderLogs);
     document.getElementById('btn-log-export').addEventListener('click', exportLogsCSV);
 
-    // REST Functions
+    function renderAccessLevelFormMappings() {
+        const container = document.getElementById('al-mappings-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (globalControllers.length === 0) {
+            container.innerHTML = '<div style="color: #888; font-size: 13px; padding: 4px 0;">No reader controllers found/loaded.</div>';
+            return;
+        }
+
+        globalControllers.forEach(ctrl => {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.gap = '12px';
+            row.style.padding = '8px 0';
+            row.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
+
+            // Checkbox + Name
+            const left = document.createElement('div');
+            left.style.display = 'flex';
+            left.style.alignItems = 'center';
+            left.style.gap = '8px';
+            left.innerHTML = `
+                <input type="checkbox" class="mapping-chk" data-reader-id="${ctrl.controller_id}">
+                <span style="font-weight: 500; color: #fff; font-size: 13px;">${ctrl.controller_id} <span style="color: #888; font-size: 12px;">(${ctrl.friendly_name})</span></span>
+            `;
+
+            // Timezone Select
+            const right = document.createElement('div');
+            const tzSelect = document.createElement('select');
+            tzSelect.className = 'mapping-tz';
+            tzSelect.style.padding = '4px 8px';
+            tzSelect.style.fontSize = '12px';
+            tzSelect.style.background = '#1e293b';
+            tzSelect.style.border = '1px solid rgba(255,255,255,0.1)';
+            tzSelect.style.borderRadius = '4px';
+            tzSelect.style.color = '#fff';
+
+            globalTimezones.forEach(tz => {
+                const opt = document.createElement('option');
+                opt.value = tz.id;
+                opt.innerText = tz.name;
+                tzSelect.appendChild(opt);
+            });
+
+            right.appendChild(tzSelect);
+            row.appendChild(left);
+            row.appendChild(right);
+            container.appendChild(row);
+        });
+    }
+
     async function loadControllers() {
         try {
             const res = await fetch('/api/controllers');
             const data = await res.json();
+            globalControllers = data;
+            renderAccessLevelFormMappings();
+
             const container = document.getElementById('doors-container');
-            const readerSelect = document.getElementById('al-reader');
             const logCtrlSelect = document.getElementById('log-ctrl-select');
             
             container.innerHTML = '';
-            readerSelect.innerHTML = '';
             logCtrlSelect.innerHTML = '<option value="">All Controllers</option>';
             document.getElementById('stat-ctrls').innerText = data.length;
 
@@ -194,12 +250,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     lockdown: false,
                     sustain: false
                 };
-
-                // Add option to reader selectors
-                const opt = document.createElement('option');
-                opt.value = ctrl.controller_id;
-                opt.innerText = `${ctrl.controller_id} (${ctrl.friendly_name})`;
-                readerSelect.appendChild(opt);
 
                 // Add option to log controller select
                 const optLog = document.createElement('option');
@@ -611,11 +661,11 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadSchedules() {
         const res = await fetch('/api/schedules');
         const data = await res.json();
-        const tbody = document.querySelector('#table-timezones tbody');
-        const alSelect = document.getElementById('al-timezone');
+        globalTimezones = data;
+        renderAccessLevelFormMappings();
 
+        const tbody = document.querySelector('#table-timezones tbody');
         tbody.innerHTML = '';
-        alSelect.innerHTML = '<option value="">-- Choose Time Zone --</option>';
 
         data.forEach(tz => {
             const tr = document.createElement('tr');
@@ -660,11 +710,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="min-width: 300px;">${timelineHtml}</td>
             `;
             tbody.appendChild(tr);
-
-            const opt = document.createElement('option');
-            opt.value = tz.id;
-            opt.innerText = tz.name;
-            alSelect.appendChild(opt);
         });
     }
 
@@ -754,18 +799,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
         data.forEach(al => {
             const tr = document.createElement('tr');
+            
+            let mappingsHtml = '';
+            if (al.mappings && al.mappings.length > 0) {
+                mappingsHtml = al.mappings.map(m => `
+                    <div style="margin-bottom: 4px;">
+                        <span class="badge" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">${m.reader_id}</span>
+                        <span style="color: #666; margin: 0 4px;">➔</span>
+                        <span style="color: var(--accent-color); font-weight: 500;">${m.timezone_name}</span>
+                    </div>
+                `).join('');
+            } else {
+                mappingsHtml = `<span style="color: #666;">No Readers Mapped</span>`;
+            }
+
+            const dhoBadge = al.dho_override 
+                ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); border: 1px solid rgba(249, 115, 22, 0.3); color: #f97316; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold;">Bypass DHO</span>`
+                : `<span style="color: #555;">No</span>`;
+
             tr.innerHTML = `
                 <td>${al.id}</td>
-                <td>${al.name}</td>
-                <td>${al.reader_id || 'N/A'}</td>
-                <td>${al.timezone_name || 'N/A'}</td>
+                <td style="font-weight: bold; color: #fff;">${al.name}</td>
+                <td>${mappingsHtml}</td>
+                <td style="vertical-align: middle;">${dhoBadge}</td>
             `;
             tbody.appendChild(tr);
 
             const lbl = document.createElement('label');
+            lbl.style.display = 'block';
+            lbl.style.marginBottom = '6px';
             lbl.innerHTML = `
                 <input type="checkbox" name="cred-al" value="${al.id}">
-                ${al.name} (Reader: ${al.reader_id || 'N/A'})
+                <span style="font-weight: bold; color: #fff;">${al.name}</span>
+                <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
             `;
             credContainer.appendChild(lbl);
         });
@@ -774,17 +840,35 @@ document.addEventListener('DOMContentLoaded', () => {
     async function saveAccessLevel(e) {
         e.preventDefault();
         const name = document.getElementById('al-name').value;
-        const reader_id = document.getElementById('al-reader').value;
-        const time_zone_id = parseInt(document.getElementById('al-timezone').value);
+        const dhoOverride = document.getElementById('al-dho-override').checked;
+
+        const mappings = [];
+        const chks = document.querySelectorAll('.mapping-chk:checked');
+        chks.forEach(chk => {
+            const readerID = chk.getAttribute('data-reader-id');
+            const row = chk.closest('div').parentElement;
+            const tzSelect = row.querySelector('.mapping-tz');
+            const tzID = parseInt(tzSelect.value);
+            mappings.push({
+                reader_id: readerID,
+                time_zone_id: tzID
+            });
+        });
+
+        if (mappings.length === 0) {
+            alert('Please select at least one reader/door for this access level.');
+            return;
+        }
 
         const res = await fetch('/api/access-levels', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, reader_id, time_zone_id })
+            body: JSON.stringify({ name, dho_override: dhoOverride, mappings })
         });
 
         if (res.ok) {
             document.getElementById('form-access-level').reset();
+            document.querySelectorAll('.mapping-chk').forEach(c => c.checked = false);
             loadAccessLevels();
         }
     }

@@ -679,6 +679,7 @@ func main() {
 				dbConn.QueryRow("SELECT value FROM system_settings WHERE key = 'threat_level'").Scan(&threatLevel)
 			}
 
+			var hasDhoOverride bool
 			if !isOffline {
 				query := `
 					WITH current_day_type AS (
@@ -705,11 +706,24 @@ func main() {
 					           FROM credential_access_levels cal
 					           JOIN access_levels al ON cal.access_level_id = al.id
 					           WHERE cal.credential_id = c.id AND al.name = 'Super Admin'
-					       ) AS is_super_admin
+					       ) AS is_super_admin,
+					       EXISTS (
+					           SELECT 1
+					           FROM credential_access_levels cal
+					           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
+					           JOIN access_levels al ON cal.access_level_id = al.id
+					           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
+					           CROSS JOIN current_day_type cdt
+					           WHERE cal.credential_id = c.id
+					             AND altz.reader_id = $3
+					             AND tzi.day_of_week = cdt.day_type
+					             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
+					             AND al.dho_override = TRUE
+					       ) AS has_dho_override
 					FROM credentials c 
 					JOIN users u ON c.user_id = u.user_id 
 					WHERE c.facility_code = $1::bigint AND c.card_id = $2::bigint`
-				err = dbConn.QueryRow(query, fc, cid, runtimeState.ControllerID).Scan(&empName, &uAct, &cAct, &currentArea, &hasScheduleAccess, &actDate, &expDate, &isSuperAdmin)
+				err = dbConn.QueryRow(query, fc, cid, runtimeState.ControllerID).Scan(&empName, &uAct, &cAct, &currentArea, &hasScheduleAccess, &actDate, &expDate, &isSuperAdmin, &hasDhoOverride)
 			} else {
 				var uActInt, cActInt int
 				query := "SELECT employee_name, user_active, cred_active, last_area, activation_date, expiration_date FROM local_credentials WHERE facility_code = ? AND card_id = ?"
@@ -718,6 +732,7 @@ func main() {
 				cAct = (cActInt == 1)
 				hasScheduleAccess = true
 				isSuperAdmin = false
+				hasDhoOverride = false
 			}
 
 			if err != nil {
@@ -811,6 +826,11 @@ func main() {
 					runtimeState.ControllerID, cid, empName, grantDetails)
 			}
 			
+			if isSuperAdmin || hasDhoOverride {
+				reader.DhoBypassed = true
+			} else {
+				reader.DhoBypassed = false
+			}
 			reader.ExecuteUnlockCycle()
 		}
 	}()

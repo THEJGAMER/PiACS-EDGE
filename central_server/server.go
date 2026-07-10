@@ -45,12 +45,20 @@ type Holiday struct {
 	Name        string `json:"name"`
 }
 
+type Mapping struct {
+	ReaderID   string `json:"reader_id"`
+	TimeZoneID int    `json:"time_zone_id"`
+	TZName     string `json:"timezone_name,omitempty"`
+}
+
 type AccessLevel struct {
-	ID        int      `json:"id"`
-	Name      string   `json:"name"`
-	ReaderID  string   `json:"reader_id,omitempty"`
-	TimeZoneID int     `json:"time_zone_id,omitempty"`
-	TZName    string   `json:"timezone_name,omitempty"`
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	ReaderID    string    `json:"reader_id,omitempty"`
+	TimeZoneID  int       `json:"time_zone_id,omitempty"`
+	TZName      string    `json:"timezone_name,omitempty"`
+	DhoOverride bool      `json:"dho_override"`
+	Mappings    []Mapping `json:"mappings,omitempty"`
 }
 
 type Credential struct {
@@ -544,7 +552,7 @@ func handleAccessLevels(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
 		rows, err := dbConn.Query(`
-			SELECT al.id, al.name, COALESCE(altz.reader_id, ''), COALESCE(altz.time_zone_id, 0), COALESCE(tz.name, '')
+			SELECT al.id, al.name, al.dho_override, COALESCE(altz.reader_id, ''), COALESCE(altz.time_zone_id, 0), COALESCE(tz.name, '')
 			FROM access_levels al
 			LEFT JOIN access_level_time_zones altz ON al.id = altz.access_level_id
 			LEFT JOIN time_zones tz ON altz.time_zone_id = tz.id
@@ -555,11 +563,52 @@ func handleAccessLevels(w http.ResponseWriter, r *http.Request) {
 		}
 		defer rows.Close()
 
-		als := []AccessLevel{}
+		alMap := make(map[int]*AccessLevel)
+		var alOrder []int
+
 		for rows.Next() {
-			var al AccessLevel
-			rows.Scan(&al.ID, &al.Name, &al.ReaderID, &al.TimeZoneID, &al.TZName)
-			als = append(als, al)
+			var id int
+			var name string
+			var dhoOverride bool
+			var readerID string
+			var tzID int
+			var tzName string
+			
+			if err := rows.Scan(&id, &name, &dhoOverride, &readerID, &tzID, &tzName); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			al, exists := alMap[id]
+			if !exists {
+				al = &AccessLevel{
+					ID:          id,
+					Name:        name,
+					DhoOverride: dhoOverride,
+					Mappings:    []Mapping{},
+				}
+				alMap[id] = al
+				alOrder = append(alOrder, id)
+			}
+
+			if readerID != "" {
+				al.Mappings = append(al.Mappings, Mapping{
+					ReaderID:   readerID,
+					TimeZoneID: tzID,
+					TZName:     tzName,
+				})
+			}
+		}
+
+		als := []AccessLevel{}
+		for _, id := range alOrder {
+			al := alMap[id]
+			if len(al.Mappings) > 0 {
+				al.ReaderID = al.Mappings[0].ReaderID
+				al.TimeZoneID = al.Mappings[0].TimeZoneID
+				al.TZName = al.Mappings[0].TZName
+			}
+			als = append(als, *al)
 		}
 		json.NewEncoder(w).Encode(als)
 
@@ -577,14 +626,26 @@ func handleAccessLevels(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var alID int
-		err = tx.QueryRow("INSERT INTO access_levels (name) VALUES ($1) RETURNING id", al.Name).Scan(&alID)
+		err = tx.QueryRow("INSERT INTO access_levels (name, dho_override) VALUES ($1, $2) RETURNING id", al.Name, al.DhoOverride).Scan(&alID)
 		if err != nil {
 			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		if al.ReaderID != "" && al.TimeZoneID != 0 {
+		if len(al.Mappings) > 0 {
+			for _, m := range al.Mappings {
+				if m.ReaderID != "" && m.TimeZoneID != 0 {
+					_, err = tx.Exec("INSERT INTO access_level_time_zones (access_level_id, reader_id, time_zone_id) VALUES ($1, $2, $3)",
+						alID, m.ReaderID, m.TimeZoneID)
+					if err != nil {
+						tx.Rollback()
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
+			}
+		} else if al.ReaderID != "" && al.TimeZoneID != 0 {
 			_, err = tx.Exec("INSERT INTO access_level_time_zones (access_level_id, reader_id, time_zone_id) VALUES ($1, $2, $3)",
 				alID, al.ReaderID, al.TimeZoneID)
 			if err != nil {

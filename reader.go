@@ -27,6 +27,7 @@ type WiegandReader struct {
 
 	// Operational State Machine Latches
 	ExpectOpen     bool
+	DhoBypassed    bool
 	DoorOpenedAt   time.Time
 	DhoTriggered   bool
 	PreAlarmActive bool
@@ -47,6 +48,7 @@ func NewWiegandReader(cfg HardwareProfile) *WiegandReader {
 		Cfg:            cfg,
 		OutputChannel:  make(chan string, 10),
 		ExpectOpen:     false,
+		DhoBypassed:    false,
 		DfoTriggered:   false,
 		DhoTriggered:   false,
 		PreAlarmActive: false,
@@ -191,7 +193,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 
 					// 2. TIMED DHO TRACKING LAYER (Runs if authorized OR if DFO is turned off)
 					if r.ExpectOpen || !r.Cfg.DfoEnabled {
-						if r.Cfg.DhoEnabled {
+						if r.Cfg.DhoEnabled && !r.DhoBypassed {
 							elapsedSecs := time.Since(r.DoorOpenedAt).Seconds()
 
 							// Stage A: Move into Pre-Alarm zone warning
@@ -224,6 +226,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 						r.DfoTriggered = false 
 						r.PreAlarmActive = false
 						r.ExpectOpen = false
+						r.DhoBypassed = false
 						r.buzzLine.SetValue(0)
 						r.hornLine.SetValue(0) 
 						r.logMessage("[DOOR] Contacts met. Perimeter returned to secure latched state. All alert matrices reset.")

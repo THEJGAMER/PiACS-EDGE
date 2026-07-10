@@ -28,3 +28,7 @@ CREATE TABLE IF NOT EXISTS map_placements (
     pos_x INT NOT NULL,
     pos_y INT NOT NULL
 );
+
+-- 5. Access Levels DHO Override feature
+ALTER TABLE access_levels 
+ADD COLUMN IF NOT EXISTS dho_override BOOLEAN DEFAULT FALSE;
