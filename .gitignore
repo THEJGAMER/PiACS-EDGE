@@ -17,3 +17,9 @@ askpass.sh
 *.db-shm
 *.db-wal
 
+# Exclude TLS keys and test binaries
+*.key
+*.crt
+mock-controller
+mock_controller/mock-controller
+
