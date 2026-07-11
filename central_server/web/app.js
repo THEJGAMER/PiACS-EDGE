@@ -1501,6 +1501,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const controller_id = document.getElementById('reg-ctrl-id').value.toUpperCase().trim();
         const friendly_name = document.getElementById('reg-ctrl-name').value.trim() || controller_id;
         const server_ip = document.getElementById('reg-ctrl-ip').value.trim();
+        const location = document.getElementById('reg-ctrl-location').value.trim();
 
         statusEl.style.display = 'block';
         statusEl.style.color = '#4ecdc4';
@@ -1510,7 +1511,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/controllers', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ controller_id, friendly_name, server_ip })
+                body: JSON.stringify({ controller_id, friendly_name, server_ip, location })
             });
             if (res.ok) {
                 statusEl.style.color = '#2ecc71';
@@ -1723,20 +1724,75 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    let selectedConfigControllerId = '';
+
     async function populateConfigControllerSelect() {
         try {
             const res = await fetch('/api/controllers');
             const data = await res.json();
-            const sel = document.getElementById('config-ctrl-select');
-            sel.innerHTML = '';
+            const listEl = document.getElementById('config-ctrl-list');
+            listEl.innerHTML = '';
+            
             data.forEach(c => {
-                const opt = document.createElement('option');
-                opt.value = c.controller_id;
-                opt.textContent = `${c.friendly_name} (${c.controller_id})`;
-                sel.appendChild(opt);
+                const card = document.createElement('div');
+                card.className = 'controller-list-card';
+                card.style.cssText = 'padding: 0.85rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer; transition: all 0.2s ease; position: relative;';
+                
+                const dotColor = c.is_online ? '#10b981' : '#ef4444';
+                card.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.4rem;">
+                        <span style="font-weight: 700; color: #fff; font-size: 13px;">${c.friendly_name}</span>
+                        <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${c.is_online ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'}; color: ${dotColor}; font-weight: bold; border: 1px solid ${c.is_online ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'};">${c.is_online ? 'ONLINE' : 'OFFLINE'}</span>
+                    </div>
+                    <div style="font-size: 11px; color: #888; font-family: monospace; margin-bottom: 0.3rem;">ID: ${c.controller_id}</div>
+                    <div style="font-size: 11px; color: #aaa; margin-bottom: 0.3rem;">🌐 ${c.server_ip}</div>
+                    <div style="font-size: 11px; color: #777;">📍 ${c.location || 'No Location Configured'}</div>
+                `;
+
+                if (selectedConfigControllerId === c.controller_id) {
+                    card.style.background = 'rgba(78, 205, 196, 0.08)';
+                    card.style.borderColor = 'var(--accent-color)';
+                }
+
+                card.addEventListener('mouseenter', () => {
+                    if (selectedConfigControllerId !== c.controller_id) {
+                        card.style.background = 'rgba(255,255,255,0.06)';
+                    }
+                });
+                card.addEventListener('mouseleave', () => {
+                    if (selectedConfigControllerId !== c.controller_id) {
+                        card.style.background = 'rgba(255,255,255,0.03)';
+                    }
+                });
+
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('#config-ctrl-list .controller-list-card').forEach(x => {
+                        x.style.background = 'rgba(255,255,255,0.03)';
+                        x.style.borderColor = 'var(--border-color)';
+                    });
+                    card.style.background = 'rgba(78, 205, 196, 0.08)';
+                    card.style.borderColor = 'var(--accent-color)';
+                    selectedConfigControllerId = c.controller_id;
+                    loadControllerConfigData(c.controller_id);
+                });
+
+                listEl.appendChild(card);
             });
+
+            // Auto-select first controller if none selected
             if (data.length > 0) {
-                loadControllerConfigData(data[0].controller_id);
+                if (!selectedConfigControllerId || !data.some(x => x.controller_id === selectedConfigControllerId)) {
+                    selectedConfigControllerId = data[0].controller_id;
+                    loadControllerConfigData(data[0].controller_id);
+                    const firstCard = listEl.querySelector('.controller-list-card');
+                    if (firstCard) {
+                        firstCard.style.background = 'rgba(78, 205, 196, 0.08)';
+                        firstCard.style.borderColor = 'var(--accent-color)';
+                    }
+                }
+            } else {
+                listEl.innerHTML = '<span style="color:#555;font-size:12px;">No controllers registered.</span>';
+                document.getElementById('form-controller-config').reset();
             }
         } catch (err) {
             console.error('Failed to load controllers for config:', err);
@@ -1760,6 +1816,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const cc = data[0];
 
             document.getElementById('cfg-controller-id').value = cc.controller_id;
+            document.getElementById('cfg-friendly-name').value = cc.friendly_name || '';
+            document.getElementById('cfg-location').value = cc.location || '';
             document.getElementById('cfg-gpio-chip').value = cc.gpio_chip_device;
             document.getElementById('cfg-d0').value = cc.wiegand_d0_pin;
             document.getElementById('cfg-d1').value = cc.wiegand_d1_pin;
@@ -1782,14 +1840,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    document.getElementById('btn-config-load').addEventListener('click', () => {
-        const sel = document.getElementById('config-ctrl-select');
-        if (sel.value) loadControllerConfigData(sel.value);
-    });
-
     document.getElementById('btn-config-reset').addEventListener('click', () => {
-        const sel = document.getElementById('config-ctrl-select');
-        if (sel.value) loadControllerConfigData(sel.value);
+        if (selectedConfigControllerId) loadControllerConfigData(selectedConfigControllerId);
     });
 
     document.getElementById('form-controller-config').addEventListener('submit', async (e) => {
@@ -1801,6 +1853,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const payload = {
             controller_id: document.getElementById('cfg-controller-id').value,
+            friendly_name: document.getElementById('cfg-friendly-name').value.trim(),
+            location: document.getElementById('cfg-location').value.trim(),
             gpio_chip_device: document.getElementById('cfg-gpio-chip').value,
             wiegand_d0_pin: parseInt(document.getElementById('cfg-d0').value),
             wiegand_d1_pin: parseInt(document.getElementById('cfg-d1').value),
@@ -1848,14 +1902,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 statusEl.innerText = `⚠️ Config saved to DB. Push status: ${data.push}`;
             }
 
+            populateConfigControllerSelect();
+            if (typeof loadMapPlacements === 'function') {
+                loadMapPlacements();
+            }
+
             setTimeout(() => { statusEl.style.display = 'none'; }, 8000);
         } catch (err) {
             statusEl.style.color = '#ff4444';
             statusEl.innerText = '❌ Error: ' + err.message;
         }
+    });
+
     document.getElementById('btn-config-delete').addEventListener('click', async () => {
-        const sel = document.getElementById('config-ctrl-select');
-        const controllerId = sel.value;
+        const controllerId = selectedConfigControllerId;
         if (!controllerId) {
             alert('No controller selected.');
             return;
@@ -1883,6 +1943,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (res.ok) {
                 alert(`✅ Controller "${controllerId}" and all associated data deleted successfully.`);
+                selectedConfigControllerId = '';
                 populateConfigControllerSelect();
                 if (typeof loadMapPlacements === 'function') {
                     loadMapPlacements();

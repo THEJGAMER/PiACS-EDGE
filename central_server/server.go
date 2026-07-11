@@ -834,10 +834,11 @@ func handleControllers(w http.ResponseWriter, r *http.Request) {
 		FriendlyName string `json:"friendly_name"`
 		IP           string `json:"server_ip"`
 		IsOnline     bool   `json:"is_online"`
+		Location     string `json:"location"`
 	}
 
 	if r.Method == http.MethodGet || r.Method == "" {
-		rows, err := dbConn.Query("SELECT controller_id, friendly_name, server_ip, is_online FROM controllers ORDER BY controller_id")
+		rows, err := dbConn.Query("SELECT controller_id, friendly_name, server_ip, is_online, COALESCE(location, '') FROM controllers ORDER BY controller_id")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -846,7 +847,7 @@ func handleControllers(w http.ResponseWriter, r *http.Request) {
 		ctrls := []Controller{}
 		for rows.Next() {
 			var c Controller
-			rows.Scan(&c.ID, &c.FriendlyName, &c.IP, &c.IsOnline)
+			rows.Scan(&c.ID, &c.FriendlyName, &c.IP, &c.IsOnline, &c.Location)
 			ctrls = append(ctrls, c)
 		}
 		json.NewEncoder(w).Encode(ctrls)
@@ -864,10 +865,10 @@ func handleControllers(w http.ResponseWriter, r *http.Request) {
 		if c.FriendlyName == "" {
 			c.FriendlyName = c.ID
 		}
-		_, err := dbConn.Exec(`INSERT INTO controllers (controller_id, friendly_name, server_ip, is_online, token_hash)
-			VALUES ($1, $2, $3, false, '')
-			ON CONFLICT (controller_id) DO UPDATE SET friendly_name = EXCLUDED.friendly_name, server_ip = EXCLUDED.server_ip`,
-			c.ID, c.FriendlyName, c.IP)
+		_, err := dbConn.Exec(`INSERT INTO controllers (controller_id, friendly_name, server_ip, is_online, token_hash, location)
+			VALUES ($1, $2, $3, false, '', $4)
+			ON CONFLICT (controller_id) DO UPDATE SET friendly_name = EXCLUDED.friendly_name, server_ip = EXCLUDED.server_ip, location = EXCLUDED.location`,
+			c.ID, c.FriendlyName, c.IP, c.Location)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -1354,6 +1355,7 @@ type ControllerConfig struct {
 	ControllerID     string `json:"controller_id"`
 	FriendlyName     string `json:"friendly_name"`
 	ServerIP         string `json:"server_ip"`
+	Location         string `json:"location"`
 	GpioChipDevice   string `json:"gpio_chip_device"`
 	WiegandD0Pin     int    `json:"wiegand_d0_pin"`
 	WiegandD1Pin     int    `json:"wiegand_d1_pin"`
@@ -1385,7 +1387,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 		var args []interface{}
 
 		if controllerID != "" {
-			query = `SELECT c.controller_id, c.friendly_name, c.server_ip,
+			query = `SELECT c.controller_id, c.friendly_name, c.server_ip, COALESCE(c.location, ''),
 				COALESCE(cc.gpio_chip_device, 'gpiochip0'), COALESCE(cc.wiegand_d0_pin, 0), COALESCE(cc.wiegand_d1_pin, 0),
 				COALESCE(cc.lock_relay_pin, 0), COALESCE(cc.reader_red_led_pin, 0), COALESCE(cc.reader_green_led_pin, 0),
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
@@ -1398,7 +1400,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 			ORDER BY c.controller_id`
 			args = append(args, controllerID)
 		} else {
-			query = `SELECT c.controller_id, c.friendly_name, c.server_ip,
+			query = `SELECT c.controller_id, c.friendly_name, c.server_ip, COALESCE(c.location, ''),
 				COALESCE(cc.gpio_chip_device, 'gpiochip0'), COALESCE(cc.wiegand_d0_pin, 0), COALESCE(cc.wiegand_d1_pin, 0),
 				COALESCE(cc.lock_relay_pin, 0), COALESCE(cc.reader_red_led_pin, 0), COALESCE(cc.reader_green_led_pin, 0),
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
@@ -1420,7 +1422,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 		configs := []ControllerConfig{}
 		for rows.Next() {
 			var cc ControllerConfig
-			rows.Scan(&cc.ControllerID, &cc.FriendlyName, &cc.ServerIP,
+			rows.Scan(&cc.ControllerID, &cc.FriendlyName, &cc.ServerIP, &cc.Location,
 				&cc.GpioChipDevice, &cc.WiegandD0Pin, &cc.WiegandD1Pin,
 				&cc.LockRelayPin, &cc.ReaderRedLedPin, &cc.ReaderGreenLedPin,
 				&cc.ReaderBuzzerPin, &cc.DsmPin, &cc.RexPin,
@@ -1438,8 +1440,16 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 1. Update the database config
-		_, err := dbConn.Exec(`
+		// 1. Update the general controller metadata
+		_, err := dbConn.Exec("UPDATE controllers SET friendly_name = $1, location = $2 WHERE controller_id = $3",
+			cc.FriendlyName, cc.Location, cc.ControllerID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to update controller details: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 2. Update the database config
+		_, err = dbConn.Exec(`
 			INSERT INTO controller_configs (
 				controller_id, gpio_chip_device, wiegand_d0_pin, wiegand_d1_pin, lock_relay_pin,
 				reader_red_led_pin, reader_green_led_pin, reader_buzzer_pin, dsm_pin, rex_pin,

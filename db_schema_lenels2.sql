@@ -32,3 +32,7 @@ CREATE TABLE IF NOT EXISTS map_placements (
 -- 5. Access Levels DHO Override feature
 ALTER TABLE access_levels 
 ADD COLUMN IF NOT EXISTS dho_override BOOLEAN DEFAULT FALSE;
+
+-- 6. Controller Location Column
+ALTER TABLE controllers
+ADD COLUMN IF NOT EXISTS location VARCHAR(255) DEFAULT '';

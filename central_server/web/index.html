@@ -371,6 +371,10 @@
                             <label for="reg-ctrl-ip">IP Address</label>
                             <input type="text" id="reg-ctrl-ip" required placeholder="e.g. 192.168.1.201">
                         </div>
+                        <div class="form-group">
+                            <label for="reg-ctrl-location">Location / Area</label>
+                            <input type="text" id="reg-ctrl-location" placeholder="e.g. South Wing First Floor">
+                        </div>
                         <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
                             <button type="submit" class="btn btn-submit" style="flex: 1;">Register Controller</button>
                             <button type="button" class="btn btn-secondary" id="btn-cancel-reg-ctrl" style="flex: 1;">Cancel</button>
@@ -547,19 +551,29 @@
                 </div>
 
                 <!-- Config Panel (hidden until auth) -->
-                <div id="config-panel" style="display: none;">
-                    <div class="card glass mb-2">
-                        <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                <div id="config-panel" style="display: none; display: flex; gap: 1.5rem; align-items: flex-start;">
+                    
+                    <!-- Left Sidebar Scroll Menu of Controllers -->
+                    <div class="card glass" style="flex: 0 0 340px; display: flex; flex-direction: column; height: 680px; padding: 1.25rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
+                        <h3 style="margin-bottom: 0.25rem; font-size: 1.2rem;">Edge Controllers</h3>
+                        <p class="subtitle" style="margin-bottom: 1rem; font-size: 0.8rem;">Select a node card to load config.</p>
+                        
+                        <!-- Scrollable Controller List Container -->
+                        <div id="config-ctrl-list" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem; padding-right: 0.25rem;">
+                            <!-- Dynamically populated vertical cards -->
+                        </div>
+                        
+                        <div style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                            <button class="btn" id="btn-config-delete" style="width: 100%; padding: 0.5rem; background: rgba(255, 50, 50, 0.12); border: 1px solid rgba(255, 50, 50, 0.25); color: #f87171; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; transition: background 0.2s;">🗑 Delete Selected Node</button>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Form Editor Panel -->
+                    <div class="card glass" style="flex: 1; padding: 1.5rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
+                        <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
-                                <h3>Controller Hardware Configuration</h3>
+                                <h3 id="config-panel-title">Controller Hardware Configuration</h3>
                                 <p class="subtitle">Remotely configure GPIO pin mappings, timeouts, and security policies. Changes are pushed live to the edge controller.</p>
-                            </div>
-                            <div style="display: flex; gap: 0.5rem; align-items: center;">
-                                <select id="config-ctrl-select" style="padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px;">
-                                    <!-- Populated dynamically -->
-                                </select>
-                                <button class="btn btn-secondary" id="btn-config-load" style="padding: 0.4rem 0.8rem;">Load Config</button>
-                                <button class="btn" id="btn-config-delete" style="padding: 0.4rem 0.8rem; background: rgba(255, 50, 50, 0.15); border: 1px solid rgba(255, 50, 50, 0.3); color: #f87171;">🗑 Delete Controller</button>
                             </div>
                         </div>
 
@@ -567,9 +581,17 @@
                             <input type="hidden" id="cfg-controller-id">
                             
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
-                                <!-- GPIO Chip -->
+                                <!-- Controller Info & GPIO Chip -->
                                 <div class="card" style="padding: 1.2rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px;">
-                                    <h4 style="margin-bottom: 1rem; color: var(--accent-blue);">📌 GPIO Device</h4>
+                                    <h4 style="margin-bottom: 1rem; color: var(--accent-blue);">📌 General & GPIO</h4>
+                                    <div class="form-group">
+                                        <label for="cfg-friendly-name">Friendly Name</label>
+                                        <input type="text" id="cfg-friendly-name" placeholder="e.g. Front Door">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-location">Location / Area</label>
+                                        <input type="text" id="cfg-location" placeholder="e.g. Floor 1 North Wing">
+                                    </div>
                                     <div class="form-group">
                                         <label for="cfg-gpio-chip">GPIO Chip Device</label>
                                         <input type="text" id="cfg-gpio-chip" value="gpiochip0">
