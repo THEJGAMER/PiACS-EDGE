@@ -100,13 +100,13 @@ func main() {
 			return
 		}
 
-		var payload map[string]string
+		var payload map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			http.Error(w, "Bad Request", http.StatusBadRequest)
 			return
 		}
 
-		log.Printf("[MOCK] REMOTE UNLOCK COMMAND RECEIVED! Command: %s, Controller: %s\n", payload["command"], payload["controller_id"])
+		log.Printf("[MOCK] REMOTE UNLOCK COMMAND RECEIVED! Command: %v, Controller: %v\n", payload["command"], payload["controller_id"])
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "success", "message": "Door unlocked"})
 	})

@@ -36,3 +36,7 @@ ADD COLUMN IF NOT EXISTS dho_override BOOLEAN DEFAULT FALSE;
 -- 6. Controller Location Column
 ALTER TABLE controllers
 ADD COLUMN IF NOT EXISTS location VARCHAR(255) DEFAULT '';
+
+-- 7. Add Relock on Open column to controller_configs
+ALTER TABLE controller_configs
+ADD COLUMN IF NOT EXISTS relock_on_open BOOLEAN DEFAULT FALSE;

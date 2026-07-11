@@ -181,6 +181,17 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 						alarmCallback("DOOR_OPEN", "Door position status changed to OPEN.")
 					}
 
+					// Relock on Open logic
+					if r.ExpectOpen && r.Cfg.RelockOnOpen {
+						r.relayMutex.Lock()
+						if !r.SustainActive {
+							r.relayLine.SetValue(0)
+							r.ExpectOpen = false
+							r.logMessage("[HARDWARE] Relock-on-Open: Door contacts broken; strike relay de-energized immediately.")
+						}
+						r.relayMutex.Unlock()
+					}
+
 					// 1. DFO TRACKING LAYER
 					if !r.ExpectOpen && r.Cfg.DfoEnabled {
 						if !r.DfoTriggered {
@@ -255,8 +266,9 @@ func (r *WiegandReader) ExecuteUnlockCycle() {
 	go func() {
 		time.Sleep(4 * time.Second) 
 		r.relayMutex.Lock()
-		if !r.SustainActive {
+		if !r.SustainActive && r.ExpectOpen {
 			r.relayLine.SetValue(0)
+			r.ExpectOpen = false
 			r.logMessage("[HARDWARE] Strike relay de-energized.")
 		}
 		r.relayMutex.Unlock()

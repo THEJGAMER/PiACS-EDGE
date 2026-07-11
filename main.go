@@ -329,8 +329,8 @@ func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) 
 			controller_id, gpio_chip_device, wiegand_d0_pin, wiegand_d1_pin, lock_relay_pin,
 			reader_red_led_pin, reader_green_led_pin, reader_buzzer_pin, dsm_pin, rex_pin,
 			wiegand_timeout_ms, dho_timeout_secs, apb_strict, dfo_enabled, dho_enabled,
-			dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed, relock_on_open
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (controller_id) DO UPDATE SET
 			gpio_chip_device = EXCLUDED.gpio_chip_device, wiegand_d0_pin = EXCLUDED.wiegand_d0_pin,
 			wiegand_d1_pin = EXCLUDED.wiegand_d1_pin, lock_relay_pin = EXCLUDED.lock_relay_pin,
@@ -339,13 +339,13 @@ func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) 
 			wiegand_timeout_ms = EXCLUDED.wiegand_timeout_ms, dho_timeout_secs = EXCLUDED.dho_timeout_secs,
 			apb_strict = EXCLUDED.apb_strict, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
 			dho_pre_alarm_secs = EXCLUDED.dho_pre_alarm_secs, alarm_horn_pin = EXCLUDED.alarm_horn_pin,
-			dsm_normally_closed = EXCLUDED.dsm_normally_closed;`
+			dsm_normally_closed = EXCLUDED.dsm_normally_closed, relock_on_open = EXCLUDED.relock_on_open;`
 
 	_, err := dbConn.Exec(query,
 		runtimeState.ControllerID, cfg.Chip, cfg.D0, cfg.D1, cfg.Rely,
 		cfg.RedLed, cfg.GrnLed, cfg.Buzz, cfg.Dsm, cfg.Rex,
 		cfg.Tout, cfg.DhoTimeout, cfg.ApbStrict, cfg.DfoEnabled, cfg.DhoEnabled,
-		cfg.DhoPreAlarmSecs, cfg.AlarmHornPin, cfg.DsmNormallyClosed)
+		cfg.DhoPreAlarmSecs, cfg.AlarmHornPin, cfg.DsmNormallyClosed, cfg.RelockOnOpen)
 
 	if err != nil {
 		edgeLogger.Printf("[DB-ERR] Remote DB configuration sync failed (%s): %v\n", syncReason, err)

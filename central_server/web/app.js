@@ -1835,6 +1835,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cfg-dho-prealarm').value = cc.dho_pre_alarm_secs;
             document.getElementById('cfg-dfo-enabled').checked = cc.dfo_enabled;
             document.getElementById('cfg-apb-strict').checked = cc.apb_strict;
+            document.getElementById('cfg-relock-on-open').checked = cc.relock_on_open || false;
         } catch (err) {
             console.error('Failed to load controller config:', err);
         }
@@ -1871,7 +1872,8 @@ document.addEventListener('DOMContentLoaded', () => {
             dho_timeout_secs: parseInt(document.getElementById('cfg-dho-timeout').value),
             dho_pre_alarm_secs: parseInt(document.getElementById('cfg-dho-prealarm').value),
             dfo_enabled: document.getElementById('cfg-dfo-enabled').checked,
-            apb_strict: document.getElementById('cfg-apb-strict').checked
+            apb_strict: document.getElementById('cfg-apb-strict').checked,
+            relock_on_open: document.getElementById('cfg-relock-on-open').checked
         };
 
         try {

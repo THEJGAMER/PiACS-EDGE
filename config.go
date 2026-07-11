@@ -39,6 +39,7 @@ type HardwareProfile struct {
 	DhoEnabled       bool   `json:"dho_enabled"`
 	DhoPreAlarmSecs  int    `json:"dho_pre_alarm_secs"`
 	AlarmHornPin     int    `json:"alarm_horn_pin"`
+	RelockOnOpen     bool   `json:"relock_on_open"`
 	
 	// Dynamic Logic Inversion Configuration
 	DsmNormallyClosed bool  `json:"dsm_normally_closed"`

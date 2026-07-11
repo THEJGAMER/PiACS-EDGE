@@ -1373,6 +1373,7 @@ type ControllerConfig struct {
 	DhoPreAlarmSecs  int    `json:"dho_pre_alarm_secs"`
 	AlarmHornPin     int    `json:"alarm_horn_pin"`
 	DsmNormallyClosed bool  `json:"dsm_normally_closed"`
+	RelockOnOpen     bool   `json:"relock_on_open"`
 }
 
 func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
@@ -1393,7 +1394,8 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
 				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
-				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false)
+				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
+				COALESCE(cc.relock_on_open, false)
 			FROM controllers c
 			LEFT JOIN controller_configs cc ON c.controller_id = cc.controller_id
 			WHERE c.controller_id = $1
@@ -1406,7 +1408,8 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
 				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
-				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false)
+				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
+				COALESCE(cc.relock_on_open, false)
 			FROM controllers c
 			LEFT JOIN controller_configs cc ON c.controller_id = cc.controller_id
 			ORDER BY c.controller_id`
@@ -1428,7 +1431,8 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				&cc.ReaderBuzzerPin, &cc.DsmPin, &cc.RexPin,
 				&cc.WiegandTimeoutMs, &cc.DhoTimeoutSecs,
 				&cc.ApbStrict, &cc.DfoEnabled, &cc.DhoEnabled,
-				&cc.DhoPreAlarmSecs, &cc.AlarmHornPin, &cc.DsmNormallyClosed)
+				&cc.DhoPreAlarmSecs, &cc.AlarmHornPin, &cc.DsmNormallyClosed,
+				&cc.RelockOnOpen)
 			configs = append(configs, cc)
 		}
 		json.NewEncoder(w).Encode(configs)
@@ -1454,8 +1458,8 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				controller_id, gpio_chip_device, wiegand_d0_pin, wiegand_d1_pin, lock_relay_pin,
 				reader_red_led_pin, reader_green_led_pin, reader_buzzer_pin, dsm_pin, rex_pin,
 				wiegand_timeout_ms, dho_timeout_secs, apb_strict, dfo_enabled, dho_enabled,
-				dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+				dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed, relock_on_open
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 			ON CONFLICT (controller_id) DO UPDATE SET
 				gpio_chip_device = EXCLUDED.gpio_chip_device, wiegand_d0_pin = EXCLUDED.wiegand_d0_pin,
 				wiegand_d1_pin = EXCLUDED.wiegand_d1_pin, lock_relay_pin = EXCLUDED.lock_relay_pin,
@@ -1464,11 +1468,11 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				wiegand_timeout_ms = EXCLUDED.wiegand_timeout_ms, dho_timeout_secs = EXCLUDED.dho_timeout_secs,
 				apb_strict = EXCLUDED.apb_strict, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
 				dho_pre_alarm_secs = EXCLUDED.dho_pre_alarm_secs, alarm_horn_pin = EXCLUDED.alarm_horn_pin,
-				dsm_normally_closed = EXCLUDED.dsm_normally_closed`,
+				dsm_normally_closed = EXCLUDED.dsm_normally_closed, relock_on_open = EXCLUDED.relock_on_open`,
 			cc.ControllerID, cc.GpioChipDevice, cc.WiegandD0Pin, cc.WiegandD1Pin, cc.LockRelayPin,
 			cc.ReaderRedLedPin, cc.ReaderGreenLedPin, cc.ReaderBuzzerPin, cc.DsmPin, cc.RexPin,
 			cc.WiegandTimeoutMs, cc.DhoTimeoutSecs, cc.ApbStrict, cc.DfoEnabled, cc.DhoEnabled,
-			cc.DhoPreAlarmSecs, cc.AlarmHornPin, cc.DsmNormallyClosed)
+			cc.DhoPreAlarmSecs, cc.AlarmHornPin, cc.DsmNormallyClosed, cc.RelockOnOpen)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("DB error: %v", err), http.StatusInternalServerError)
 			return
@@ -1505,6 +1509,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				"dho_pre_alarm_secs": cc.DhoPreAlarmSecs,
 				"alarm_horn_pin":    cc.AlarmHornPin,
 				"dsm_normally_closed": cc.DsmNormallyClosed,
+				"relock_on_open":     cc.RelockOnOpen,
 			},
 		}
 		body, _ := json.Marshal(pushPayload)
