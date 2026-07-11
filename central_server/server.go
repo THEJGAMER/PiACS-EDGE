@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/tls"
 	"database/sql"
@@ -20,12 +21,55 @@ import (
 )
 
 var (
-	dbConn     *sql.DB
-	clients    = make(map[chan string]bool)
-	mu         sync.Mutex
-	authTokens = make(map[string]time.Time) // session token -> expiry
-	authMu     sync.Mutex
+	dbConn        *sql.DB
+	clients       = make(map[chan string]bool)
+	mu            sync.Mutex
+	authTokens    = make(map[string]time.Time) // session token -> expiry
+	authMu        sync.Mutex
+	adminPassword string
 )
+
+type CentralConfig struct {
+	DatabaseURL   string `json:"database_url"`
+	AdminPassword string `json:"admin_password"`
+}
+
+func loadEnvFile(filename string) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return // ignore if file doesn't exist
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			if strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"") {
+				val = val[1 : len(val)-1]
+			} else if strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'") {
+				val = val[1 : len(val)-1]
+			}
+			os.Setenv(key, val)
+		}
+	}
+}
+
+func loadConfigJSON(filename string) (CentralConfig, error) {
+	var cfg CentralConfig
+	file, err := os.Open(filename)
+	if err != nil {
+		return cfg, err
+	}
+	defer file.Close()
+	err = json.NewDecoder(file).Decode(&cfg)
+	return cfg, err
+}
 
 type TimeZone struct {
 	ID        int                 `json:"id"`
@@ -77,10 +121,30 @@ type Credential struct {
 }
 
 func main() {
+	loadEnvFile(".env")
+
 	connStr := os.Getenv("DATABASE_URL")
+	adminPassword = os.Getenv("ADMIN_PASSWORD")
+
+	if connStr == "" || adminPassword == "" {
+		if cfg, err := loadConfigJSON("config.json"); err == nil {
+			if connStr == "" {
+				connStr = cfg.DatabaseURL
+			}
+			if adminPassword == "" {
+				adminPassword = cfg.AdminPassword
+			}
+		}
+	}
+
+	// Fallback to local default parameters to ensure local service works out-of-the-box
 	if connStr == "" {
 		connStr = "host=192.168.0.141 port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable"
 	}
+	if adminPassword == "" {
+		adminPassword = "Allcanget11"
+	}
+
 	var err error
 	dbConn, err = sql.Open("postgres", connStr)
 	if err != nil {
@@ -91,7 +155,7 @@ func main() {
 	if err = dbConn.Ping(); err != nil {
 		log.Fatalf("Failed to ping DB: %v", err)
 	}
-	log.Println("Successfully connected to PostgreSQL at 192.168.0.141")
+	log.Println("Successfully connected to PostgreSQL database")
 
 	// Start PG Notification Listener
 	go startPGListener(connStr)
@@ -1259,11 +1323,11 @@ func handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Retrieve admin password from system_settings, default to 'Allcanget11'
+	// Retrieve admin password from system_settings, fallback to configured adminPassword
 	var storedPassword string
 	err := dbConn.QueryRow("SELECT value FROM system_settings WHERE key = 'admin_password'").Scan(&storedPassword)
 	if err != nil {
-		storedPassword = "Allcanget11"
+		storedPassword = adminPassword
 	}
 
 	if req.Password != storedPassword {
