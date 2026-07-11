@@ -322,34 +322,73 @@ After editing both files, restart PostgreSQL:
 sudo systemctl restart postgresql
 ```
 
-#### 3. Initialize the PostgreSQL schemas:
-Ensure the database and user `edge_ctrl` exist, then run:
+#### 3. Create Security User & Schema Databases
+Log into PostgreSQL as `postgres` superuser:
 ```bash
-psql -d piacs_security -f db_schema_schedules.sql
-psql -d piacs_security -f db_schema_lenels2.sql
-psql -d piacs_security -f triggers.sql
+sudo -u postgres psql
+```
+Execute the database initialization commands:
+```sql
+-- 1. Create the dedicated database role user
+CREATE USER edge_ctrl WITH PASSWORD 'YOUR_DB_PASSWORD';
+
+-- 2. Create the target system database
+CREATE DATABASE piacs_security OWNER edge_ctrl;
+
+-- 3. Grant connection permission
+GRANT CONNECT ON DATABASE piacs_security TO edge_ctrl;
+```
+
+#### 4. Initialize Database Schemas & Event Triggers
+Apply the database schemas defined in this repository in the following exact order:
+```bash
+# 1. Base structure (schedules, intervals, and access levels tables)
+psql -h YOUR_DB_IP -U edge_ctrl -d piacs_security -f db_schema_schedules.sql
+
+# 2. LenelS2 quality extensions (PIN codes, threat levels, and DHO bypass)
+psql -h YOUR_DB_IP -U edge_ctrl -d piacs_security -f db_schema_lenels2.sql
+
+# 3. Real-time system notify event trigger rules
+psql -h YOUR_DB_IP -U edge_ctrl -d piacs_security -f triggers.sql
 ```
 
 ---
 
-### B. Central Server Deployment (ACS-FRONTEND)
+### B. Central Server & Frontend Setup (ACS-FRONTEND)
 
-The Central Management Server supports database routing overrides via the `DATABASE_URL` environment variable.
+The Central Management Server supports database routing overrides via a local `.env` configuration file or a `config.json` file in its working directory.
 
-#### 1. Build the server binary:
+#### 1. Setup Environment Configuration
+In the server deployment directory `/root/central_server/`, configure either of the following setup options:
+
+##### Option A: Using `.env` environment variables
+Create a `.env` file matching [central_server/.env.example](central_server/.env.example):
+```env
+# Central Server Database Connection Configuration
+DATABASE_URL=host=YOUR_DB_IP port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable
+
+# Central Management Admin Override Panel Password
+ADMIN_PASSWORD=YOUR_ADMIN_PASSWORD
+```
+
+##### Option B: Using `config.json` configuration
+Alternatively, create a `config.json` file matching [central_server/config.json.example](central_server/config.json.example):
+```json
+{
+  "database_url": "host=YOUR_DB_IP port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable",
+  "admin_password": "YOUR_ADMIN_PASSWORD"
+}
+```
+
+#### 2. Compile Server Binary
+Run from the repository root:
 ```bash
 cd central_server
 go build -o central-server .
 ```
 
-#### 2. Run with Custom IP Environment Variables:
-If your database is hosted at `192.168.1.50`, specify the connection string inline:
-```bash
-DATABASE_URL="host=192.168.1.50 port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable" ./central-server
-```
-
-#### 3. Systemd Service Configuration
-If deploying as a systemd service, configure `/etc/systemd/system/central-server.service` to include the environment variables:
+#### 3. Systemd Service Deployment
+Configure `/etc/systemd/system/central-server.service` on the frontend VM. If you chose **Option A (.env)**, you can pass environment variables directly:
 ```ini
 [Unit]
 Description=PiACS Access Control Central Web Server
@@ -357,9 +396,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root
+WorkingDirectory=/root/central_server
 Environment="DATABASE_URL=host=YOUR_DB_IP port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable"
-ExecStart=/root/central-server
+Environment="ADMIN_PASSWORD=YOUR_ADMIN_PASSWORD"
+ExecStart=/root/central_server/central-server
 Restart=always
 RestartSec=5
 StandardOutput=append:/var/log/central_server_stdout.log
@@ -367,6 +407,12 @@ StandardError=append:/var/log/central_server_stderr.log
 
 [Install]
 WantedBy=multi-user.target
+```
+Start and enable the system service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable central-server.service
+sudo systemctl start central-server.service
 ```
 
 ---

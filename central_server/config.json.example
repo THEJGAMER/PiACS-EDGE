@@ -1,0 +1,4 @@
+{
+  "database_url": "host=192.168.0.141 port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable",
+  "admin_password": "YOUR_ADMIN_PASSWORD"
+}
