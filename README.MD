@@ -345,7 +345,7 @@ go build -o central-server .
 #### 2. Run with Custom IP Environment Variables:
 If your database is hosted at `192.168.1.50`, specify the connection string inline:
 ```bash
-DATABASE_URL="host=192.168.1.50 port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable" ./central-server
+DATABASE_URL="host=192.168.1.50 port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable" ./central-server
 ```
 
 #### 3. Systemd Service Configuration
@@ -358,7 +358,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/root
-Environment="DATABASE_URL=host=YOUR_DB_IP port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable"
+Environment="DATABASE_URL=host=YOUR_DB_IP port=5432 user=edge_ctrl password=YOUR_DB_PASSWORD dbname=piacs_security sslmode=disable"
 ExecStart=/root/central-server
 Restart=always
 RestartSec=5
@@ -386,7 +386,7 @@ On the Raspberry Pi, create a file named `config.json` in the same directory as 
     "db_host": "192.168.0.141",
     "db_port": 5432,
     "db_user": "edge_ctrl",
-    "db_password": "Allcanget11",
+    "db_password": "YOUR_DB_PASSWORD",
     "db_name": "piacs_security",
     "ssl_mode": "disable"
   },
