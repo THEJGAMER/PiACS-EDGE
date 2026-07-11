@@ -1853,5 +1853,46 @@ document.addEventListener('DOMContentLoaded', () => {
             statusEl.style.color = '#ff4444';
             statusEl.innerText = '❌ Error: ' + err.message;
         }
+    document.getElementById('btn-config-delete').addEventListener('click', async () => {
+        const sel = document.getElementById('config-ctrl-select');
+        const controllerId = sel.value;
+        if (!controllerId) {
+            alert('No controller selected.');
+            return;
+        }
+
+        const confirmMsg = `⚠️ WARNING: ARE YOU SURE YOU WANT TO DELETE THIS CONTROLLER? ⚠️\n\n` +
+                           `This will permanently delete controller "${controllerId}" from the database.\n\n` +
+                           `This action will also DELETE:\n` +
+                           `- All Door Map Placements\n` +
+                           `- All Controller Configurations\n` +
+                           `- All Access Level Mappings for this controller\n` +
+                           `- ALL HISTORIC ACCESS LOG EVENTS\n` +
+                           `- ALL SYSTEM ALARMS & BREACH ALERTS\n\n` +
+                           `This cannot be undone. Type 'DELETE' to confirm:`;
+
+        const confirmation = prompt(confirmMsg);
+        if (confirmation !== 'DELETE') {
+            alert('Deletion cancelled.');
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/controllers?controller_id=${controllerId}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                alert(`✅ Controller "${controllerId}" and all associated data deleted successfully.`);
+                populateConfigControllerSelect();
+                if (typeof loadMapPlacements === 'function') {
+                    loadMapPlacements();
+                }
+            } else {
+                const err = await res.text();
+                alert('Deletion failed: ' + err);
+            }
+        } catch (err) {
+            alert('Network error: ' + err.message);
+        }
     });
 });

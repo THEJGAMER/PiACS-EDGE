@@ -890,6 +890,8 @@ func handleControllers(w http.ResponseWriter, r *http.Request) {
 		tx.Exec("DELETE FROM map_placements WHERE controller_id = $1", controllerID)
 		tx.Exec("DELETE FROM controller_configs WHERE controller_id = $1", controllerID)
 		tx.Exec("DELETE FROM access_level_time_zones WHERE reader_id = $1", controllerID)
+		tx.Exec("DELETE FROM access_logs WHERE controller_id = $1", controllerID)
+		tx.Exec("DELETE FROM system_alarms WHERE controller_id = $1", controllerID)
 		_, err = tx.Exec("DELETE FROM controllers WHERE controller_id = $1", controllerID)
 		if err != nil {
 			tx.Rollback()
