@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,7 +77,10 @@ type Credential struct {
 }
 
 func main() {
-	connStr := "host=192.168.0.141 port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable"
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = "host=192.168.0.141 port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable"
+	}
 	var err error
 	dbConn, err = sql.Open("postgres", connStr)
 	if err != nil {

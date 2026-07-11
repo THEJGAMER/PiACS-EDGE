@@ -296,26 +296,127 @@ The edge engine utilizes the native Linux GPIO character device interface (`/dev
 
 ## 5. Quick Installation & Execution Guide
 
-### Central Server Deployment (ACS-FRONTEND)
-1. Initialize the PostgreSQL schemas:
-   ```bash
-   psql -d piacs_security -f db_schema_schedules.sql
-   psql -d piacs_security -f db_schema_lenels2.sql
-   psql -d piacs_security -f triggers.sql
-   ```
-2. Build and run the server:
-   ```bash
-   cd central_server
-   go build -o central-server .
-   ./central-server
-   ```
+### A. Database Network & Security Setup (ACS-DB)
 
-### Edge Controller Deployment (Raspberry Pi)
-1. Build the local engine (CGO is required for the SQLite driver):
-   ```bash
-   CGO_ENABLED=1 go build -ldflags="-s -w" -o piacs-edge-engine .
-   ```
-2. Run the executable:
-   ```bash
-   sudo ./piacs-edge-engine
-   ```
+When deploying PostgreSQL on a different host/IP from the Central Server or Edge Nodes, you must configure PostgreSQL to accept remote TCP connections.
+
+#### 1. Enable Listener Interface
+By default, PostgreSQL only listens on the local loopback interface (`127.0.0.1`). To change this, edit `/etc/postgresql/<version>/main/postgresql.conf` on the database server:
+```ini
+# Listen on all network interface IPs
+listen_addresses = '*'
+```
+
+#### 2. Configure Client Authentication (`pg_hba.conf`)
+You must allow your specific Central Server and Edge IP addresses (or subnets) to connect with credentials. Edit `/etc/postgresql/<version>/main/pg_hba.conf`:
+```text
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+# Allow Central Server VM (192.168.0.140) to connect:
+host    piacs_security  edge_ctrl       192.168.0.140/32        scram-sha-256
+
+# Allow Edge Controller Subnet (e.g. 192.168.1.0/24) to connect:
+host    piacs_security  edge_ctrl       192.168.1.0/24          scram-sha-256
+```
+After editing both files, restart PostgreSQL:
+```bash
+sudo systemctl restart postgresql
+```
+
+#### 3. Initialize the PostgreSQL schemas:
+Ensure the database and user `edge_ctrl` exist, then run:
+```bash
+psql -d piacs_security -f db_schema_schedules.sql
+psql -d piacs_security -f db_schema_lenels2.sql
+psql -d piacs_security -f triggers.sql
+```
+
+---
+
+### B. Central Server Deployment (ACS-FRONTEND)
+
+The Central Management Server supports database routing overrides via the `DATABASE_URL` environment variable.
+
+#### 1. Build the server binary:
+```bash
+cd central_server
+go build -o central-server .
+```
+
+#### 2. Run with Custom IP Environment Variables:
+If your database is hosted at `192.168.1.50`, specify the connection string inline:
+```bash
+DATABASE_URL="host=192.168.1.50 port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable" ./central-server
+```
+
+#### 3. Systemd Service Configuration
+If deploying as a systemd service, configure `/etc/systemd/system/central-server.service` to include the environment variables:
+```ini
+[Unit]
+Description=PiACS Access Control Central Web Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root
+Environment="DATABASE_URL=host=YOUR_DB_IP port=5432 user=edge_ctrl password=Allcanget11 dbname=piacs_security sslmode=disable"
+ExecStart=/root/central-server
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/central_server_stdout.log
+StandardError=append:/var/log/central_server_stderr.log
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+### C. Edge Controller Deployment (Raspberry Pi)
+
+Each Edge node reads its target database IP from its local `config.json` configuration file.
+
+#### 1. Create the `config.json` Configuration File
+On the Raspberry Pi, create a file named `config.json` in the same directory as the executable:
+```json
+{
+  "controller_id": "LOBBY-EDGE-01",
+  "api_token": "YOUR_SECURE_API_BEARER_TOKEN",
+  "backend_port": 8080,
+  "database_config": {
+    "db_host": "192.168.0.141",
+    "db_port": 5432,
+    "db_user": "edge_ctrl",
+    "db_password": "Allcanget11",
+    "db_name": "piacs_security",
+    "ssl_mode": "disable"
+  },
+  "hardware_mapping": {
+    "gpio_chip_device": "/dev/gpiochip4",
+    "wiegand_d0_pin": 14,
+    "wiegand_d1_pin": 15,
+    "lock_relay_pin": 18,
+    "reader_red_led_pin": 23,
+    "reader_green_led_pin": 24,
+    "reader_buzzer_pin": 25,
+    "dsm_pin": 8,
+    "rex_pin": 7,
+    "wiegand_timeout_ms": 50,
+    "dho_timeout_secs": 60,
+    "dho_pre_alarm_secs": 15,
+    "alarm_horn_pin": 12,
+    "apb_strict": true,
+    "dfo_enabled": true,
+    "dho_enabled": true,
+    "dsm_normally_closed": true
+  }
+}
+```
+*Simply change the `"db_host"` field to match the IP address of your PostgreSQL database host.*
+
+#### 2. Compile and Run:
+Make sure to build with `CGO_ENABLED=1` for the embedded SQLite driver:
+```bash
+CGO_ENABLED=1 go build -ldflags="-s -w" -o piacs-edge-engine .
+sudo ./piacs-edge-engine
+```
+
