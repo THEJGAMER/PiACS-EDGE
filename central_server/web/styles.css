@@ -530,14 +530,20 @@ body {
     border-left: 3px solid transparent;
 }
 
-.log-row.grant {
+.log-row.grant, .log-row.open-close {
     border-left-color: var(--green-color);
     background-color: rgba(16, 185, 129, 0.03);
 }
 
-.log-row.deny, .log-row.alarm {
+.log-row.deny {
     border-left-color: var(--red-color);
-    background-color: rgba(239, 68, 68, 0.03);
+    background-color: rgba(239, 68, 68, 0.02);
+}
+
+.log-row.alarm {
+    border-left-color: var(--red-color);
+    background-color: rgba(239, 68, 68, 0.05);
+    box-shadow: inset 1px 0 0 var(--red-color);
 }
 
 .log-row.warn {
@@ -555,7 +561,7 @@ body {
     min-width: 130px;
 }
 
-.log-row.grant .type { color: var(--green-color); }
+.log-row.grant .type, .log-row.open-close .type { color: var(--green-color); }
 .log-row.deny .type { color: var(--red-color); }
 .log-row.alarm .type { color: var(--red-color); }
 .log-row.warn .type { color: var(--yellow-color); }
@@ -1159,4 +1165,74 @@ body {
     border-radius: 2px;
 }
 
+/* Badges for System Logs Levels */
+.syslog-row .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 4px;
+    min-width: 60px;
+    text-align: center;
+    border: 1px solid transparent;
+}
+.syslog-row .badge-info {
+    color: #3b82f6;
+    background: rgba(59, 130, 246, 0.1);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+.syslog-row .badge-warn {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.3);
+}
+.syslog-row .badge-error {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+.syslog-row .badge-fatal {
+    color: #a855f7;
+    background: rgba(168, 85, 247, 0.1);
+    border-color: rgba(168, 85, 247, 0.3);
+}
 
+/* Word Search Highlights */
+.search-highlight {
+    background-color: rgba(254, 240, 138, 0.9) !important; /* light yellow */
+    color: #000 !important;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: bold;
+}
+
+/* Controller Configuration Cards Highlighting */
+.controller-list-card {
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.controller-list-card:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.controller-list-card.active {
+    background: rgba(78, 205, 196, 0.08) !important;
+    border-color: var(--accent-color) !important;
+    box-shadow: 0 0 12px rgba(78, 205, 196, 0.25), inset 0 0 4px rgba(78, 205, 196, 0.1) !important;
+}
+
+/* Validation Error Banner styling */
+#config-validation-error {
+    animation: slide-down 0.25s ease-out;
+}
+@keyframes slide-down {
+    from {
+        transform: translateY(-8px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}

@@ -21,6 +21,7 @@
                 <a href="#threat" class="menu-item" id="btn-threat">Threat Postures</a>
                 <a href="#health" class="menu-item" id="btn-health">System Health</a>
                 <a href="#accesshub" class="menu-item" id="btn-accesshub">🔑 Access Control Hub</a>
+                <a href="#events" class="menu-item" id="btn-events">📋 Events Console</a>
                 <a href="#syslogs" class="menu-item" id="btn-syslogs">System Logs</a>
                 <a href="#config" class="menu-item" id="btn-config">🔧 Controller Config</a>
             </nav>
@@ -505,6 +506,62 @@
                 </div>
             </section>
 
+            <!-- Events Console View -->
+            <section id="view-events" class="view-panel">
+                <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 1.5rem; height: calc(100vh - 120px);">
+                    <!-- Left column: Events Stream -->
+                    <div class="card glass" style="display: flex; flex-direction: column; overflow: hidden; padding: 1.5rem; height: 100%;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1rem; flex-shrink: 0;">
+                            <h3 style="margin: 0; color: var(--accent-red);">📋 Events Console</h3>
+                            <div style="display: flex; gap: 0.75rem; align-items: center;">
+                                <select id="event-mode-select" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9rem;">
+                                    <option value="door">Door Mode</option>
+                                    <option value="site">Site Mode</option>
+                                </select>
+                                <select id="event-door-select" class="form-control" style="width: auto; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9rem;">
+                                    <option value="">All Doors</option>
+                                </select>
+                                <select id="event-site-select" class="form-control" style="display: none; width: auto; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; font-size: 0.9rem;">
+                                    <option value="">All Sites</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; flex-shrink: 0;">
+                            <button class="sub-tab-item active" id="btn-event-view-combined" style="padding: 0.4rem 1rem; border-radius: 4px; border: none; background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer; font-size: 0.9rem;">Combined View</button>
+                            <button class="sub-tab-item" id="btn-event-view-alarms" style="padding: 0.4rem 1rem; border-radius: 4px; border: none; background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer; font-size: 0.9rem;">Alarms Only</button>
+                            <button class="sub-tab-item" id="btn-event-view-events" style="padding: 0.4rem 1rem; border-radius: 4px; border: none; background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer; font-size: 0.9rem;">Access & Door Events</button>
+                        </div>
+
+                        <div class="syslog-console-wrapper" style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; flex-grow: 1; overflow-y: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4;">
+                            <div class="console-body" id="event-stream-console">
+                                <!-- Real-time filtered events load here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right column: Site Management -->
+                    <div class="card glass" style="display: flex; flex-direction: column; padding: 1.5rem; height: 100%; overflow: hidden;">
+                        <h3 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-red); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; flex-shrink: 0;">🏢 Site Grouping</h3>
+                        
+                        <div style="margin-bottom: 1.5rem; flex-shrink: 0;">
+                            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.95rem;">Create New Site</h4>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <input type="text" id="input-new-site-name" placeholder="Site Name..." style="flex-grow: 1; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; outline: none; font-size: 0.9rem;">
+                                <button class="btn btn-grant" id="btn-create-site" style="padding: 0.4rem 0.8rem;">Add</button>
+                            </div>
+                            <div id="site-error-msg" style="color: var(--accent-red); font-size: 0.8rem; margin-top: 0.25rem; display: none;"></div>
+                        </div>
+
+                        <div style="flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;">
+                            <h4 style="margin: 0; font-size: 0.95rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.25rem;">Active Sites</h4>
+                            <div id="site-list-container" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                                <!-- Dynamic sites rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             <!-- System Logs View -->
             <section id="view-syslogs" class="view-panel">
                 <div class="card glass">
@@ -522,7 +579,9 @@
                                 <option value="FATAL">FATAL</option>
                             </select>
                             <input type="text" id="log-msg-search" placeholder="Search logs..." style="padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; outline: none; width: 200px;">
+                            <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.85rem; cursor: pointer; color: var(--text-secondary);"><input type="checkbox" id="chk-log-autoscroll" checked> Auto-Scroll</label>
                             <button class="btn btn-secondary" id="btn-syslog-refresh" style="padding: 0.4rem 0.8rem;">🔄 Refresh</button>
+                            <button class="btn btn-secondary" id="btn-syslog-export" style="padding: 0.4rem 0.8rem;">📥 Export CSV</button>
                         </div>
                     </div>
                     <div class="syslog-console-wrapper" style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; height: 500px; overflow-y: auto; font-family: monospace; font-size: 0.9rem; line-height: 1.4;">
@@ -535,10 +594,10 @@
 
             <!-- Controller Configuration View -->
             <section id="view-config" class="view-panel">
-                <!-- Auth Gate -->
-                <div id="config-auth-gate" class="card glass" style="max-width: 420px; margin: 2rem auto; text-align: center;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
-                    <h3>Authentication Required</h3>
+                <!-- Config Auth Gate (Password prompt) -->
+                <div id="config-auth-gate" class="card glass" style="max-width: 400px; margin: 4rem auto; padding: 2rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
+                    <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">🔐</div>
+                    <h3 style="text-align: center; margin-bottom: 0.5rem; font-size: 1.3rem;">Authentication Required</h3>
                     <p class="subtitle" style="margin-bottom: 1.5rem;">Enter the admin password to access controller hardware configuration.</p>
                     <form id="form-config-auth" class="form-container">
                         <div class="form-group">
@@ -570,6 +629,9 @@
 
                     <!-- Right Column: Form Editor Panel -->
                     <div class="card glass" style="flex: 1; padding: 1.5rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
+                        <div id="config-validation-error" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid var(--red-color); color: #f87171; padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1.5rem; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+                            <!-- Validation errors go here -->
+                        </div>
                         <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start;">
                             <div>
                                 <h3 id="config-panel-title">Controller Hardware Configuration</h3>
@@ -591,6 +653,12 @@
                                     <div class="form-group">
                                         <label for="cfg-location">Location / Area</label>
                                         <input type="text" id="cfg-location" placeholder="e.g. Floor 1 North Wing">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="cfg-site">Site Assignment</label>
+                                        <select id="cfg-site" style="width: 100%; padding: 0.4rem 0.8rem; background: var(--bg-card); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 4px; outline: none; font-size: 0.95rem;">
+                                            <option value="">None (Unassigned)</option>
+                                        </select>
                                     </div>
                                     <div class="form-group">
                                         <label for="cfg-gpio-chip">GPIO Chip Device</label>

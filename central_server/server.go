@@ -182,6 +182,7 @@ func main() {
 	http.HandleFunc("/api/map-placements", handleMapPlacements)
 	http.HandleFunc("/api/apb-status", handleAPBStatus)
 	http.HandleFunc("/api/auth/login", handleAuthLogin)
+	http.HandleFunc("/api/sites", handleSites)
 	http.HandleFunc("/api/controller-config", requireAuth(handleControllerConfig))
 
 	log.Println("Central Web Server starting on http://0.0.0.0:8000")
@@ -270,15 +271,62 @@ func handleEventsStream(w http.ResponseWriter, r *http.Request) {
 
 func handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
-	// Fetch last 50 entries combining access logs and alarms
-	query := `
-		(SELECT 'access_logs' AS source, id::text, event_timestamp AS created_at, controller_id, event_type, details, employee_name, card_id::text FROM access_logs)
-		UNION ALL
-		(SELECT 'system_alarms' AS source, alarm_id::text, created_at, controller_id, alarm_type, details, '' AS employee_name, '' AS card_id FROM system_alarms)
-		ORDER BY created_at DESC LIMIT 50`
-	
-	rows, err := dbConn.Query(query)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	controllerID := r.URL.Query().Get("controller_id")
+	siteIDStr := r.URL.Query().Get("site_id")
+	filterView := r.URL.Query().Get("filter_view") // alarms, events, combined/all
+
+	var args []interface{}
+	argCount := 1
+
+	// Access logs subquery
+	accessSelect := `SELECT 'access_logs' AS source, al.id::text, al.event_timestamp AS created_at, al.controller_id, al.event_type, al.details, al.employee_name, al.card_id::text 
+                     FROM access_logs al`
+	// Alarms subquery
+	alarmSelect := `SELECT 'system_alarms' AS source, sa.alarm_id::text, sa.created_at, sa.controller_id, sa.alarm_type AS event_type, sa.details, '' AS employee_name, '' AS card_id 
+                    FROM system_alarms sa`
+
+	var accessWhere []string
+	var alarmWhere []string
+
+	if controllerID != "" {
+		accessWhere = append(accessWhere, fmt.Sprintf("al.controller_id = $%d", argCount))
+		alarmWhere = append(alarmWhere, fmt.Sprintf("sa.controller_id = $%d", argCount))
+		args = append(args, controllerID)
+		argCount++
+	}
+
+	if siteIDStr != "" {
+		accessSelect += " JOIN controllers c ON al.controller_id = c.controller_id"
+		alarmSelect += " JOIN controllers c ON sa.controller_id = c.controller_id"
+		
+		accessWhere = append(accessWhere, fmt.Sprintf("c.site_id = $%d", argCount))
+		alarmWhere = append(alarmWhere, fmt.Sprintf("c.site_id = $%d", argCount))
+		args = append(args, siteIDStr)
+		argCount++
+	}
+
+	if len(accessWhere) > 0 {
+		accessSelect += " WHERE " + strings.Join(accessWhere, " AND ")
+	}
+	if len(alarmWhere) > 0 {
+		alarmSelect += " WHERE " + strings.Join(alarmWhere, " AND ")
+	}
+
+	var unionParts []string
+	if filterView == "alarms" {
+		unionParts = append(unionParts, "("+alarmSelect+")")
+	} else if filterView == "events" {
+		unionParts = append(unionParts, "("+accessSelect+")")
+	} else {
+		unionParts = append(unionParts, "("+accessSelect+")", "("+alarmSelect+")")
+	}
+
+	query := strings.Join(unionParts, " UNION ALL ")
+	query += " ORDER BY created_at DESC LIMIT 100"
+
+	rows, err := dbConn.Query(query, args...)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1374,6 +1422,7 @@ type ControllerConfig struct {
 	AlarmHornPin     int    `json:"alarm_horn_pin"`
 	DsmNormallyClosed bool  `json:"dsm_normally_closed"`
 	RelockOnOpen     bool   `json:"relock_on_open"`
+	SiteID           *int   `json:"site_id"`
 }
 
 func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
@@ -1395,7 +1444,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
 				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
 				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
-				COALESCE(cc.relock_on_open, false)
+				COALESCE(cc.relock_on_open, false), c.site_id
 			FROM controllers c
 			LEFT JOIN controller_configs cc ON c.controller_id = cc.controller_id
 			WHERE c.controller_id = $1
@@ -1409,7 +1458,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
 				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
 				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
-				COALESCE(cc.relock_on_open, false)
+				COALESCE(cc.relock_on_open, false), c.site_id
 			FROM controllers c
 			LEFT JOIN controller_configs cc ON c.controller_id = cc.controller_id
 			ORDER BY c.controller_id`
@@ -1432,7 +1481,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				&cc.WiegandTimeoutMs, &cc.DhoTimeoutSecs,
 				&cc.ApbStrict, &cc.DfoEnabled, &cc.DhoEnabled,
 				&cc.DhoPreAlarmSecs, &cc.AlarmHornPin, &cc.DsmNormallyClosed,
-				&cc.RelockOnOpen)
+				&cc.RelockOnOpen, &cc.SiteID)
 			configs = append(configs, cc)
 		}
 		json.NewEncoder(w).Encode(configs)
@@ -1444,9 +1493,9 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 1. Update the general controller metadata
-		_, err := dbConn.Exec("UPDATE controllers SET friendly_name = $1, location = $2 WHERE controller_id = $3",
-			cc.FriendlyName, cc.Location, cc.ControllerID)
+		// 1. Update the general controller metadata including site_id
+		_, err := dbConn.Exec("UPDATE controllers SET friendly_name = $1, location = $2, site_id = $3 WHERE controller_id = $4",
+			cc.FriendlyName, cc.Location, cc.SiteID, cc.ControllerID)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to update controller details: %v", err), http.StatusInternalServerError)
 			return
@@ -1642,5 +1691,76 @@ func startControllerHealthPoller() {
 				}
 			}(t)
 		}
+	}
+}
+
+type Site struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+func handleSites(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		rows, err := dbConn.Query("SELECT id, name FROM sites ORDER BY name")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		sites := []Site{}
+		for rows.Next() {
+			var s Site
+			if err := rows.Scan(&s.ID, &s.Name); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			sites = append(sites, s)
+		}
+		json.NewEncoder(w).Encode(sites)
+
+	} else if r.Method == http.MethodPost {
+		var s Site
+		if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if s.Name == "" {
+			http.Error(w, "name is required", http.StatusBadRequest)
+			return
+		}
+
+		err := dbConn.QueryRow("INSERT INTO sites (name) VALUES ($1) RETURNING id", s.Name).Scan(&s.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(s)
+
+	} else if r.Method == http.MethodDelete {
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			http.Error(w, "id query parameter is required", http.StatusBadRequest)
+			return
+		}
+		_, err := dbConn.Exec("DELETE FROM sites WHERE id = $1", idStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	} else {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 	}
 }

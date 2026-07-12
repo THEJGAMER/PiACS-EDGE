@@ -40,3 +40,12 @@ ADD COLUMN IF NOT EXISTS location VARCHAR(255) DEFAULT '';
 -- 7. Add Relock on Open column to controller_configs
 ALTER TABLE controller_configs
 ADD COLUMN IF NOT EXISTS relock_on_open BOOLEAN DEFAULT FALSE;
+
+-- 8. Sites Table & Controller Site Mapping
+CREATE TABLE IF NOT EXISTS sites (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+
+ALTER TABLE controllers
+ADD COLUMN IF NOT EXISTS site_id INT REFERENCES sites(id) ON DELETE SET NULL;
