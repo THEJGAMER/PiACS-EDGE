@@ -556,11 +556,11 @@
                         <div style="flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem;">
                             <h4 style="margin: 0; font-size: 0.95rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.25rem;">Active Sites</h4>
                             <div id="site-list-container" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
-                                <!-- Dynamic sites rendered here -->
                             </div>
                         </div>
                     </div>
                 </div>
+            </section>
 
             <!-- System Logs View -->
             <section id="view-syslogs" class="view-panel">
@@ -594,10 +594,10 @@
 
             <!-- Controller Configuration View -->
             <section id="view-config" class="view-panel">
-                <!-- Config Auth Gate (Password prompt) -->
-                <div id="config-auth-gate" class="card glass" style="max-width: 400px; margin: 4rem auto; padding: 2rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
-                    <div style="font-size: 3rem; text-align: center; margin-bottom: 1rem;">🔐</div>
-                    <h3 style="text-align: center; margin-bottom: 0.5rem; font-size: 1.3rem;">Authentication Required</h3>
+                <!-- Auth Gate -->
+                <div id="config-auth-gate" class="card glass" style="max-width: 420px; margin: 2rem auto; text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
+                    <h3>Authentication Required</h3>
                     <p class="subtitle" style="margin-bottom: 1.5rem;">Enter the admin password to access controller hardware configuration.</p>
                     <form id="form-config-auth" class="form-container">
                         <div class="form-group">
@@ -610,7 +610,7 @@
                 </div>
 
                 <!-- Config Panel (hidden until auth) -->
-                <div id="config-panel" style="display: none; display: flex; gap: 1.5rem; align-items: flex-start;">
+                <div id="config-panel" style="display: none; gap: 1.5rem; align-items: flex-start;">
                     
                     <!-- Left Sidebar Scroll Menu of Controllers -->
                     <div class="card glass" style="flex: 0 0 340px; display: flex; flex-direction: column; height: 680px; padding: 1.25rem; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
