@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -92,7 +93,7 @@ func initLogger() {
 
 func initLocalCache() {
 	var err error
-	localCache, err = sql.Open("sqlite3", "./edge_cache.db")
+	localCache, err = sql.Open("sqlite3", "./edge_cache.db?_busy_timeout=5000")
 	if err != nil {
 		edgeLogger.Fatalf("[CACHE-FATAL] Unable to build SQLite context: %v", err)
 	}
@@ -641,7 +642,10 @@ func main() {
 			case <-stopSignal:
 				return
 			case <-ticker.C:
-				if dbConn.Ping() != nil {
+				pingCtx, pingCancel := context.WithTimeout(context.Background(), 2*time.Second)
+				pingErr := dbConn.PingContext(pingCtx)
+				pingCancel()
+				if pingErr != nil {
 					if !isOffline {
 						isOffline = true
 						edgeLogger.Println("[NETWORK-ALERT] Central database connection dropped. Entering offline isolation state...")
@@ -664,174 +668,196 @@ func main() {
 
 	go func() {
 		for bitStream := range reader.OutputChannel {
-			fc, cid, valid := AlignAndParseWiegand(bitStream, 35)
-			if !valid { continue }
+			go func(stream string) {
+				fc, cid, valid := AlignAndParseWiegand(stream, 35)
+				if !valid { return }
 
-			edgeLogger.Printf("[SWIPE] Raw Bits caught: %d (FC:%d ID:%d)\n", len(bitStream), fc, cid)
+				edgeLogger.Printf("[SWIPE] Raw Bits caught: %d (FC:%d ID:%d)\n", len(stream), fc, cid)
 
-			var empName, currentArea string
-			var uAct, cAct, hasScheduleAccess, isSuperAdmin bool
-			var actDate, expDate sql.NullTime
-			var actDateStr, expDateStr sql.NullString
+				var empName, currentArea string
+				var uAct, cAct, hasScheduleAccess, isSuperAdmin bool
+				var actDate, expDate sql.NullTime
+				var actDateStr, expDateStr sql.NullString
 
-			var threatLevel string = "NORMAL"
-			if !isOffline {
-				dbConn.QueryRow("SELECT value FROM system_settings WHERE key = 'threat_level'").Scan(&threatLevel)
-			}
-
-			var hasDhoOverride bool
-			if !isOffline {
-				query := `
-					WITH current_day_type AS (
-						SELECT CASE 
-							WHEN EXISTS (SELECT 1 FROM holidays WHERE holiday_date = CURRENT_DATE) THEN 7
-							ELSE EXTRACT(DOW FROM CURRENT_TIMESTAMP)
-						END AS day_type
-					)
-					SELECT u.employee_name, u.is_active, c.is_active, COALESCE(u.last_area, 'OUTSIDE'),
-					       EXISTS (
-					           SELECT 1
-					           FROM credential_access_levels cal
-					           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
-					           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
-					           CROSS JOIN current_day_type cdt
-					           WHERE cal.credential_id = c.id
-					             AND altz.reader_id = $3
-					             AND tzi.day_of_week = cdt.day_type
-					             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
-					       ) AS has_schedule_access,
-					       c.activation_date, c.expiration_date,
-					       EXISTS (
-					           SELECT 1
-					           FROM credential_access_levels cal
-					           JOIN access_levels al ON cal.access_level_id = al.id
-					           WHERE cal.credential_id = c.id AND al.name = 'Super Admin'
-					       ) AS is_super_admin,
-					       EXISTS (
-					           SELECT 1
-					           FROM credential_access_levels cal
-					           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
-					           JOIN access_levels al ON cal.access_level_id = al.id
-					           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
-					           CROSS JOIN current_day_type cdt
-					           WHERE cal.credential_id = c.id
-					             AND altz.reader_id = $3
-					             AND tzi.day_of_week = cdt.day_type
-					             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
-					             AND al.dho_override = TRUE
-					       ) AS has_dho_override
-					FROM credentials c 
-					JOIN users u ON c.user_id = u.user_id 
-					WHERE c.facility_code = $1::bigint AND c.card_id = $2::bigint`
-				err = dbConn.QueryRow(query, fc, cid, runtimeState.ControllerID).Scan(&empName, &uAct, &cAct, &currentArea, &hasScheduleAccess, &actDate, &expDate, &isSuperAdmin, &hasDhoOverride)
-			} else {
-				var uActInt, cActInt int
-				query := "SELECT employee_name, user_active, cred_active, last_area, activation_date, expiration_date FROM local_credentials WHERE facility_code = ? AND card_id = ?"
-				err = localCache.QueryRow(query, fc, cid).Scan(&empName, &uActInt, &cActInt, &currentArea, &actDateStr, &expDateStr)
-				uAct = (uActInt == 1)
-				cAct = (cActInt == 1)
-				hasScheduleAccess = true
-				isSuperAdmin = false
-				hasDhoOverride = false
-			}
-
-			if err != nil {
-				edgeLogger.Printf("[DENY] Card profile unregistered or lookup failed: FC:%d ID:%d | Error: %v\n", fc, cid, err)
-				reader.ExecuteBuzzerPulse(3)
-				continue
-			}
-
-			// Expiry and activation validations
-			nowDate := time.Now()
-			if !isOffline {
-				if actDate.Valid && nowDate.Before(actDate.Time) {
-					edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDate.Time.Format("2006-01-02"))
-					reader.ExecuteBuzzerPulse(3)
-					continue
-				}
-				if expDate.Valid && nowDate.After(expDate.Time) {
-					edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDate.Time.Format("2006-01-02"))
-					reader.ExecuteBuzzerPulse(3)
-					continue
-				}
-			} else {
-				if actDateStr.Valid && actDateStr.String != "" {
-					if t, parseErr := time.Parse("2006-01-02", actDateStr.String); parseErr == nil && nowDate.Before(t) {
-						edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDateStr.String)
-						reader.ExecuteBuzzerPulse(3)
-						continue
-					}
-				}
-				if expDateStr.Valid && expDateStr.String != "" {
-					if t, parseErr := time.Parse("2006-01-02", expDateStr.String); parseErr == nil && nowDate.After(t) {
-						edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDateStr.String)
-						reader.ExecuteBuzzerPulse(3)
-						continue
-					}
-				}
-			}
-
-			// System-wide threat level conditions
-			if threatLevel == "LOCKDOWN" || reader.LockdownActive {
-				edgeLogger.Printf("[DENY-LOCKDOWN] Lockdown active. Swipe by user %s rejected.\n", empName)
-				reader.ExecuteBuzzerPulse(5)
-				continue
-			}
-
-			if threatLevel == "HIGH_ALERT" && !isSuperAdmin {
-				edgeLogger.Printf("[DENY-HIGH_ALERT] High Alert active. Swipe by non-super-admin %s rejected.\n", empName)
-				reader.ExecuteBuzzerPulse(4)
-				continue
-			}
-
-			if !hasScheduleAccess {
-				edgeLogger.Printf("[DENY-SCHEDULE] Access schedule constraint active for employee %s (FC:%d ID:%d).\n", empName, fc, cid)
-				reader.ExecuteBuzzerPulse(3)
-				
+				var threatLevel string = "NORMAL"
 				if !isOffline {
-					denyDetails := fmt.Sprintf("Access denied due to schedule constraint. Card outside active timezone or holiday override. FC:%d ID:%d matched %s.", fc, cid, empName)
-					dbConn.Exec("INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'DENY_SCHEDULE', $4)",
-						runtimeState.ControllerID, cid, empName, denyDetails)
+					ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+					err := dbConn.QueryRowContext(ctx, "SELECT value FROM system_settings WHERE key = 'threat_level'").Scan(&threatLevel)
+					cancel()
+					if err != nil {
+						edgeLogger.Printf("[DB-TIMEOUT] Threat level lookup failed or timed out: %v", err)
+					}
 				}
-				continue
-			}
 
-			// FIXED POSTURE CHECK: Scan for boolean flags directly
-			if !uAct || !cAct {
-				edgeLogger.Printf("[DENY] Access profile state inactive for employee %s.\n", empName)
-				reader.ExecuteBuzzerPulse(3)
-				continue
-			}
+				var hasDhoOverride bool
+				useOfflineCache := isOffline
 
-			targetArea := "SECURE_ZONE"
-			if runtimeState.HardwareMapping.ApbEnabled {
-				if currentArea == targetArea {
-					reportAlarm("APB_VIOLATION", fmt.Sprintf("Anti-Passback violation tracking caught for user %s.", empName))
-					edgeLogger.Printf("[APB-REJECT] APB active boundary blocking for user %s.\n", empName)
+				if !useOfflineCache {
+					query := `
+						WITH current_day_type AS (
+							SELECT CASE 
+								WHEN EXISTS (SELECT 1 FROM holidays WHERE holiday_date = CURRENT_DATE) THEN 7
+								ELSE EXTRACT(DOW FROM CURRENT_TIMESTAMP)
+							END AS day_type
+						)
+						SELECT u.employee_name, u.is_active, c.is_active, COALESCE(u.last_area, 'OUTSIDE'),
+						       EXISTS (
+						           SELECT 1
+						           FROM credential_access_levels cal
+						           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
+						           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
+						           CROSS JOIN current_day_type cdt
+						           WHERE cal.credential_id = c.id
+						             AND altz.reader_id = $3
+						             AND tzi.day_of_week = cdt.day_type
+						             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
+						       ) AS has_schedule_access,
+						       c.activation_date, c.expiration_date,
+						       EXISTS (
+						           SELECT 1
+						           FROM credential_access_levels cal
+						           JOIN access_levels al ON cal.access_level_id = al.id
+						           WHERE cal.credential_id = c.id AND al.name = 'Super Admin'
+						       ) AS is_super_admin,
+						       EXISTS (
+						           SELECT 1
+						           FROM credential_access_levels cal
+						           JOIN access_level_time_zones altz ON cal.access_level_id = altz.access_level_id
+						           JOIN access_levels al ON cal.access_level_id = al.id
+						           JOIN time_zone_intervals tzi ON altz.time_zone_id = tzi.time_zone_id
+						           CROSS JOIN current_day_type cdt
+						           WHERE cal.credential_id = c.id
+						             AND altz.reader_id = $3
+						             AND tzi.day_of_week = cdt.day_type
+						             AND CURRENT_TIME BETWEEN tzi.start_time AND tzi.end_time
+						             AND al.dho_override = TRUE
+						       ) AS has_dho_override
+						FROM credentials c 
+						JOIN users u ON c.user_id = u.user_id 
+						WHERE c.facility_code = $1::bigint AND c.card_id = $2::bigint`
+					ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+					err = dbConn.QueryRowContext(ctx, query, fc, cid, runtimeState.ControllerID).Scan(&empName, &uAct, &cAct, &currentArea, &hasScheduleAccess, &actDate, &expDate, &isSuperAdmin, &hasDhoOverride)
+					cancel()
+					if err != nil {
+						edgeLogger.Printf("[DB-TIMEOUT] PostgreSQL lookup failed or timed out: %v. Falling back to local cache.", err)
+						useOfflineCache = true
+					}
+				}
+
+				if useOfflineCache {
+					var uActInt, cActInt int
+					queryLocal := "SELECT employee_name, user_active, cred_active, last_area, activation_date, expiration_date FROM local_credentials WHERE facility_code = ? AND card_id = ?"
+					err = localCache.QueryRow(queryLocal, fc, cid).Scan(&empName, &uActInt, &cActInt, &currentArea, &actDateStr, &expDateStr)
+					if err != nil {
+						edgeLogger.Printf("[DENY] Card profile unregistered or lookup failed: FC:%d ID:%d | Error: %v\n", fc, cid, err)
+						reader.ExecuteBuzzerPulse(3)
+						return
+					}
+					uAct = (uActInt == 1)
+					cAct = (cActInt == 1)
+					hasScheduleAccess = true
+					isSuperAdmin = false
+					hasDhoOverride = false
+				}
+
+				// Expiry and activation validations
+				nowDate := time.Now()
+				if !useOfflineCache {
+					if actDate.Valid && nowDate.Before(actDate.Time) {
+						edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDate.Time.Format("2006-01-02"))
+						reader.ExecuteBuzzerPulse(3)
+						return
+					}
+					if expDate.Valid && nowDate.After(expDate.Time) {
+						edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDate.Time.Format("2006-01-02"))
+						reader.ExecuteBuzzerPulse(3)
+						return
+					}
+				} else {
+					if actDateStr.Valid && actDateStr.String != "" {
+						if t, parseErr := time.Parse("2006-01-02", actDateStr.String); parseErr == nil && nowDate.Before(t) {
+							edgeLogger.Printf("[DENY-DATE] Credential not yet active: %s (Activates: %s)\n", empName, actDateStr.String)
+							reader.ExecuteBuzzerPulse(3)
+							return
+						}
+					}
+					if expDateStr.Valid && expDateStr.String != "" {
+						if t, parseErr := time.Parse("2006-01-02", expDateStr.String); parseErr == nil && nowDate.After(t) {
+							edgeLogger.Printf("[DENY-DATE] Credential expired: %s (Expired: %s)\n", empName, expDateStr.String)
+							reader.ExecuteBuzzerPulse(3)
+							return
+						}
+					}
+				}
+
+				// System-wide threat level conditions
+				if threatLevel == "LOCKDOWN" || reader.LockdownActive {
+					edgeLogger.Printf("[DENY-LOCKDOWN] Lockdown active. Swipe by user %s rejected.\n", empName)
+					reader.ExecuteBuzzerPulse(5)
+					return
+				}
+
+				if threatLevel == "HIGH_ALERT" && !isSuperAdmin {
+					edgeLogger.Printf("[DENY-HIGH_ALERT] High Alert active. Swipe by non-super-admin %s rejected.\n", empName)
+					reader.ExecuteBuzzerPulse(4)
+					return
+				}
+
+				if !hasScheduleAccess {
+					edgeLogger.Printf("[DENY-SCHEDULE] Access schedule constraint active for employee %s (FC:%d ID:%d).\n", empName, fc, cid)
 					reader.ExecuteBuzzerPulse(3)
-					continue
+					
+					if !useOfflineCache {
+						denyDetails := fmt.Sprintf("Access denied due to schedule constraint. Card outside active timezone or holiday override. FC:%d ID:%d matched %s.", fc, cid, empName)
+						ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+						_, _ = dbConn.ExecContext(ctx, "INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'DENY_SCHEDULE', $4)",
+							runtimeState.ControllerID, cid, empName, denyDetails)
+						cancel()
+					}
+					return
 				}
-			}
 
-			if !isOffline {
-				dbConn.Exec("UPDATE users SET last_area = $1 WHERE employee_name = $2", targetArea, empName)
-			}
-			localCache.Exec("UPDATE local_credentials SET last_area = ? WHERE employee_name = ?", targetArea, empName)
+				// FIXED POSTURE CHECK: Scan for boolean flags directly
+				if !uAct || !cAct {
+					edgeLogger.Printf("[DENY] Access profile state inactive for employee %s.\n", empName)
+					reader.ExecuteBuzzerPulse(3)
+					return
+				}
 
-			edgeLogger.Printf("[GRANT] Authorization verified: %s. Releasing latch relay strike pins.\n", empName)
-			
-			if !isOffline {
-				grantDetails := fmt.Sprintf("Card swipe authorization successful. FC:%d ID:%d matched employee record.", fc, cid)
-				dbConn.Exec("INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'CARD_GRANT', $4)",
-					runtimeState.ControllerID, cid, empName, grantDetails)
-			}
-			
-			if isSuperAdmin || hasDhoOverride {
-				reader.DhoBypassed = true
-			} else {
-				reader.DhoBypassed = false
-			}
-			reader.ExecuteUnlockCycle()
+				targetArea := "SECURE_ZONE"
+				if runtimeState.HardwareMapping.ApbEnabled {
+					if currentArea == targetArea {
+						reportAlarm("APB_VIOLATION", fmt.Sprintf("Anti-Passback violation tracking caught for user %s.", empName))
+						edgeLogger.Printf("[APB-REJECT] APB active boundary blocking for user %s.\n", empName)
+						reader.ExecuteBuzzerPulse(3)
+						return
+					}
+				}
+
+				if !useOfflineCache {
+					ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+					_, _ = dbConn.ExecContext(ctx, "UPDATE users SET last_area = $1 WHERE employee_name = $2", targetArea, empName)
+					cancel()
+				}
+				localCache.Exec("UPDATE local_credentials SET last_area = ? WHERE employee_name = ?", targetArea, empName)
+
+				edgeLogger.Printf("[GRANT] Authorization verified: %s. Releasing latch relay strike pins.\n", empName)
+				
+				if !useOfflineCache {
+					grantDetails := fmt.Sprintf("Card swipe authorization successful. FC:%d ID:%d matched employee record.", fc, cid)
+					ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+					_, _ = dbConn.ExecContext(ctx, "INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'CARD_GRANT', $4)",
+						runtimeState.ControllerID, cid, empName, grantDetails)
+					cancel()
+				}
+				
+				if isSuperAdmin || hasDhoOverride {
+					reader.DhoBypassed = true
+				} else {
+					reader.DhoBypassed = false
+				}
+				reader.ExecuteUnlockCycle()
+			}(bitStream)
 		}
 	}()
 
