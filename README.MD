@@ -17,17 +17,17 @@ PiACS-EDGE is an enterprise-grade Physical Access Control System (PACS) engineer
                          +-----------------------------------+
                          |  Central Go Web Server (Port 8000) |
                          +-----------------------------------+
-                                    /              \
-         Command Overrides (HTTPS) /                \ Sync & Audit logs
-                                  v                  v
-                       +-------------------+   +--------------------+
-                       | PiACS-EDGE Engine |<->| PostgreSQL Database|
-                       |  (Raspberry Pi)   |   |   (Port 5432)      |
-                       +-------------------+   +--------------------+
-                           /           \
-                 Local IO /             \ Fallback Lookups
-                         v               v
-            [Peripherals, Readers]   [Local SQLite Cache]
+                                     /              \
+          Command Overrides (HTTPS) /                \ Sync & Audit logs
+                                   v                  v
+                        +-------------------+   +--------------------+
+                        | PiACS-EDGE Engine |<->| PostgreSQL Database|
+                        |  (Raspberry Pi)   |   |   (Port 5432)      |
+                        +-------------------+   +--------------------+
+                            /           \
+                  Local IO /             \ Fallback Lookups
+                          v               v
+             [Peripherals, Readers]   [Local SQLite Cache]
 ```
 
 ---
@@ -244,11 +244,11 @@ Connects to PostgreSQL database
           │
           ▼
 Check: Does controller_id exist in table "controllers"?
-         ├─── YES ───► Update transient state only (server_ip, is_online, last_heartbeat)
-         └─── NO  ───► Insert new row with default name & server_ip
-                         │
-                         ▼
-                       Insert default pin map schemas into "controller_configs"
+          ├─── YES ───► Update transient state only (server_ip, is_online, last_heartbeat)
+          └─── NO  ───► Insert new row with default name & server_ip
+                          │
+                          ▼
+                        Insert default pin map schemas into "controller_configs"
 ```
 
 ---
@@ -450,7 +450,7 @@ On the Raspberry Pi, create a file named `config.json` in the same directory as 
     "dho_timeout_secs": 60,
     "dho_pre_alarm_secs": 15,
     "alarm_horn_pin": 12,
-    "apb_strict": true,
+    "apb_enabled": true,
     "dfo_enabled": true,
     "dho_enabled": true,
     "dsm_normally_closed": true
@@ -465,4 +465,3 @@ Make sure to build with `CGO_ENABLED=1` for the embedded SQLite driver:
 CGO_ENABLED=1 go build -ldflags="-s -w" -o piacs-edge-engine .
 sudo ./piacs-edge-engine
 ```
-

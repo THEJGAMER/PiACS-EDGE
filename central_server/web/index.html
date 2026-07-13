@@ -595,9 +595,9 @@
             <!-- Controller Configuration View -->
             <section id="view-config" class="view-panel">
                 <!-- Auth Gate -->
-                <div id="config-auth-gate" class="card glass" style="max-width: 420px; margin: 2rem auto; text-align: center;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔐</div>
-                    <h3>Authentication Required</h3>
+                <div id="config-auth-gate" class="card glass" style="max-width: 400px; margin: 4rem auto; padding: 2.5rem; text-align: center; border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card);">
+                    <div style="font-size: 3.5rem; margin-bottom: 1.5rem; text-shadow: 0 0 15px rgba(59, 130, 246, 0.3);">🔑</div>
+                    <h3 style="margin-bottom: 0.5rem; font-size: 1.4rem;">AUTHENTICATION REQUIRED</h3>
                     <p class="subtitle" style="margin-bottom: 1.5rem;">Enter the admin password to access controller hardware configuration.</p>
                     <form id="form-config-auth" class="form-container">
                         <div class="form-group">
@@ -759,8 +759,8 @@
                                         </div>
                                         <div>
                                             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.75rem;">
-                                                <input type="checkbox" id="cfg-apb-strict" style="width: auto;">
-                                                <span>Strict Anti-Passback</span>
+                                                <input type="checkbox" id="cfg-apb-enabled" style="width: auto;">
+                                                <span>Anti-Passback (APB) Enabled</span>
                                             </label>
                                             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-bottom: 0.75rem;">
                                                 <input type="checkbox" id="cfg-relock-on-open" style="width: auto;">

@@ -34,7 +34,7 @@ type HardwareProfile struct {
 	Rex              int    `json:"rex_pin"`
 	Tout             int    `json:"wiegand_timeout_ms"`
 	DhoTimeout       int    `json:"dho_timeout_secs"`
-	ApbStrict        bool   `json:"apb_strict"`
+	ApbEnabled       bool   `json:"apb_enabled"`
 	DfoEnabled       bool   `json:"dfo_enabled"`
 	DhoEnabled       bool   `json:"dho_enabled"`
 	DhoPreAlarmSecs  int    `json:"dho_pre_alarm_secs"`

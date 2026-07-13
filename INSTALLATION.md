@@ -237,7 +237,7 @@ Create a local `config.json` configuration file on the Pi:
     "dho_timeout_secs": 60,
     "dho_pre_alarm_secs": 15,
     "alarm_horn_pin": 12,
-    "apb_strict": true,
+    "apb_enabled": true,
     "dfo_enabled": true,
     "dho_enabled": true,
     "dsm_normally_closed": true

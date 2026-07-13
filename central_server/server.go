@@ -1415,7 +1415,7 @@ type ControllerConfig struct {
 	RexPin           int    `json:"rex_pin"`
 	WiegandTimeoutMs int    `json:"wiegand_timeout_ms"`
 	DhoTimeoutSecs   int    `json:"dho_timeout_secs"`
-	ApbStrict        bool   `json:"apb_strict"`
+	ApbEnabled       bool   `json:"apb_enabled"`
 	DfoEnabled       bool   `json:"dfo_enabled"`
 	DhoEnabled       bool   `json:"dho_enabled"`
 	DhoPreAlarmSecs  int    `json:"dho_pre_alarm_secs"`
@@ -1442,7 +1442,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.lock_relay_pin, 0), COALESCE(cc.reader_red_led_pin, 0), COALESCE(cc.reader_green_led_pin, 0),
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
-				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
+				COALESCE(cc.apb_enabled, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
 				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
 				COALESCE(cc.relock_on_open, false), c.site_id
 			FROM controllers c
@@ -1456,7 +1456,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				COALESCE(cc.lock_relay_pin, 0), COALESCE(cc.reader_red_led_pin, 0), COALESCE(cc.reader_green_led_pin, 0),
 				COALESCE(cc.reader_buzzer_pin, 0), COALESCE(cc.dsm_pin, 0), COALESCE(cc.rex_pin, 0),
 				COALESCE(cc.wiegand_timeout_ms, 50), COALESCE(cc.dho_timeout_secs, 60),
-				COALESCE(cc.apb_strict, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
+				COALESCE(cc.apb_enabled, false), COALESCE(cc.dfo_enabled, false), COALESCE(cc.dho_enabled, true),
 				COALESCE(cc.dho_pre_alarm_secs, 15), COALESCE(cc.alarm_horn_pin, 0), COALESCE(cc.dsm_normally_closed, false),
 				COALESCE(cc.relock_on_open, false), c.site_id
 			FROM controllers c
@@ -1479,7 +1479,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				&cc.LockRelayPin, &cc.ReaderRedLedPin, &cc.ReaderGreenLedPin,
 				&cc.ReaderBuzzerPin, &cc.DsmPin, &cc.RexPin,
 				&cc.WiegandTimeoutMs, &cc.DhoTimeoutSecs,
-				&cc.ApbStrict, &cc.DfoEnabled, &cc.DhoEnabled,
+				&cc.ApbEnabled, &cc.DfoEnabled, &cc.DhoEnabled,
 				&cc.DhoPreAlarmSecs, &cc.AlarmHornPin, &cc.DsmNormallyClosed,
 				&cc.RelockOnOpen, &cc.SiteID)
 			configs = append(configs, cc)
@@ -1506,7 +1506,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO controller_configs (
 				controller_id, gpio_chip_device, wiegand_d0_pin, wiegand_d1_pin, lock_relay_pin,
 				reader_red_led_pin, reader_green_led_pin, reader_buzzer_pin, dsm_pin, rex_pin,
-				wiegand_timeout_ms, dho_timeout_secs, apb_strict, dfo_enabled, dho_enabled,
+				wiegand_timeout_ms, dho_timeout_secs, apb_enabled, dfo_enabled, dho_enabled,
 				dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed, relock_on_open
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 			ON CONFLICT (controller_id) DO UPDATE SET
@@ -1515,12 +1515,12 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				reader_red_led_pin = EXCLUDED.reader_red_led_pin, reader_green_led_pin = EXCLUDED.reader_green_led_pin,
 				reader_buzzer_pin = EXCLUDED.reader_buzzer_pin, dsm_pin = EXCLUDED.dsm_pin, rex_pin = EXCLUDED.rex_pin,
 				wiegand_timeout_ms = EXCLUDED.wiegand_timeout_ms, dho_timeout_secs = EXCLUDED.dho_timeout_secs,
-				apb_strict = EXCLUDED.apb_strict, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
+				apb_enabled = EXCLUDED.apb_enabled, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
 				dho_pre_alarm_secs = EXCLUDED.dho_pre_alarm_secs, alarm_horn_pin = EXCLUDED.alarm_horn_pin,
 				dsm_normally_closed = EXCLUDED.dsm_normally_closed, relock_on_open = EXCLUDED.relock_on_open`,
 			cc.ControllerID, cc.GpioChipDevice, cc.WiegandD0Pin, cc.WiegandD1Pin, cc.LockRelayPin,
 			cc.ReaderRedLedPin, cc.ReaderGreenLedPin, cc.ReaderBuzzerPin, cc.DsmPin, cc.RexPin,
-			cc.WiegandTimeoutMs, cc.DhoTimeoutSecs, cc.ApbStrict, cc.DfoEnabled, cc.DhoEnabled,
+			cc.WiegandTimeoutMs, cc.DhoTimeoutSecs, cc.ApbEnabled, cc.DfoEnabled, cc.DhoEnabled,
 			cc.DhoPreAlarmSecs, cc.AlarmHornPin, cc.DsmNormallyClosed, cc.RelockOnOpen)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("DB error: %v", err), http.StatusInternalServerError)
@@ -1552,7 +1552,7 @@ func handleControllerConfig(w http.ResponseWriter, r *http.Request) {
 				"rex_pin":           cc.RexPin,
 				"wiegand_timeout_ms": cc.WiegandTimeoutMs,
 				"dho_timeout_secs":  cc.DhoTimeoutSecs,
-				"apb_strict":        cc.ApbStrict,
+				"apb_enabled":        cc.ApbEnabled,
 				"dfo_enabled":       cc.DfoEnabled,
 				"dho_enabled":       cc.DhoEnabled,
 				"dho_pre_alarm_secs": cc.DhoPreAlarmSecs,

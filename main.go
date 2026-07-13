@@ -301,7 +301,7 @@ func autoRegisterController() {
 	if isOffline { return }
 	ip := getOutboundIP()
 	
-	// Register the controller if it doesn't exist, or update runtime IP/online status on conflict
+	// Register the controller if it doesn't exist, or update transient IP/online status on conflict
 	_, err := dbConn.Exec(`
 		INSERT INTO controllers (controller_id, friendly_name, server_ip, is_online, last_heartbeat, token_hash)
 		VALUES ($1, $2, $3, true, NOW(), $4)
@@ -328,7 +328,7 @@ func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) 
 		INSERT INTO controller_configs (
 			controller_id, gpio_chip_device, wiegand_d0_pin, wiegand_d1_pin, lock_relay_pin,
 			reader_red_led_pin, reader_green_led_pin, reader_buzzer_pin, dsm_pin, rex_pin,
-			wiegand_timeout_ms, dho_timeout_secs, apb_strict, dfo_enabled, dho_enabled,
+			wiegand_timeout_ms, dho_timeout_secs, apb_enabled, dfo_enabled, dho_enabled,
 			dho_pre_alarm_secs, alarm_horn_pin, dsm_normally_closed, relock_on_open
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		ON CONFLICT (controller_id) DO UPDATE SET
@@ -337,14 +337,14 @@ func pushLocalConfigToDatabaseReference(cfg HardwareProfile, syncReason string) 
 			reader_red_led_pin = EXCLUDED.reader_red_led_pin, reader_green_led_pin = EXCLUDED.reader_green_led_pin,
 			reader_buzzer_pin = EXCLUDED.reader_buzzer_pin, dsm_pin = EXCLUDED.dsm_pin, rex_pin = EXCLUDED.rex_pin,
 			wiegand_timeout_ms = EXCLUDED.wiegand_timeout_ms, dho_timeout_secs = EXCLUDED.dho_timeout_secs,
-			apb_strict = EXCLUDED.apb_strict, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
+			apb_enabled = EXCLUDED.apb_enabled, dfo_enabled = EXCLUDED.dfo_enabled, dho_enabled = EXCLUDED.dho_enabled,
 			dho_pre_alarm_secs = EXCLUDED.dho_pre_alarm_secs, alarm_horn_pin = EXCLUDED.alarm_horn_pin,
 			dsm_normally_closed = EXCLUDED.dsm_normally_closed, relock_on_open = EXCLUDED.relock_on_open;`
 
 	_, err := dbConn.Exec(query,
 		runtimeState.ControllerID, cfg.Chip, cfg.D0, cfg.D1, cfg.Rely,
 		cfg.RedLed, cfg.GrnLed, cfg.Buzz, cfg.Dsm, cfg.Rex,
-		cfg.Tout, cfg.DhoTimeout, cfg.ApbStrict, cfg.DfoEnabled, cfg.DhoEnabled,
+		cfg.Tout, cfg.DhoTimeout, cfg.ApbEnabled, cfg.DfoEnabled, cfg.DhoEnabled,
 		cfg.DhoPreAlarmSecs, cfg.AlarmHornPin, cfg.DsmNormallyClosed, cfg.RelockOnOpen)
 
 	if err != nil {
@@ -804,10 +804,10 @@ func main() {
 			}
 
 			targetArea := "SECURE_ZONE"
-			if currentArea == targetArea {
-				reportAlarm("APB_VIOLATION", fmt.Sprintf("Anti-Passback violation tracking caught for user %s.", empName))
-				if runtimeState.HardwareMapping.ApbStrict {
-					edgeLogger.Printf("[APB-REJECT] Strict APB active boundary blocking for user %s.\n", empName)
+			if runtimeState.HardwareMapping.ApbEnabled {
+				if currentArea == targetArea {
+					reportAlarm("APB_VIOLATION", fmt.Sprintf("Anti-Passback violation tracking caught for user %s.", empName))
+					edgeLogger.Printf("[APB-REJECT] APB active boundary blocking for user %s.\n", empName)
 					reader.ExecuteBuzzerPulse(3)
 					continue
 				}
