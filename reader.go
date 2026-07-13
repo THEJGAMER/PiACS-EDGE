@@ -37,7 +37,7 @@ type WiegandReader struct {
 
 	// Electrical Anti-Chatter Latches
 	relayMutex     sync.Mutex
-	relayCooldown  bool
+	relockTime     time.Time
 	
 	// Spattering prevention flag tracker
 	lastLoggedState string
@@ -170,6 +170,16 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 			case <-ticker.C:
 				doorIsOpen := r.IsDoorPhysicallyOpen()
 
+				if r.ExpectOpen {
+					r.relayMutex.Lock()
+					if !r.SustainActive && time.Now().After(r.relockTime) {
+						r.relayLine.SetValue(0)
+						r.ExpectOpen = false
+						r.logMessage("[HARDWARE] Strike relay de-energized.")
+					}
+					r.relayMutex.Unlock()
+				}
+
 				if doorIsOpen {
 					if r.DoorOpenedAt.IsZero() {
 						r.DoorOpenedAt = time.Now()
@@ -252,32 +262,16 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 
 func (r *WiegandReader) ExecuteUnlockCycle() {
 	r.relayMutex.Lock()
-	if r.LockdownActive || r.relayCooldown {
-		r.relayMutex.Unlock()
+	defer r.relayMutex.Unlock()
+
+	if r.LockdownActive {
 		return
 	}
-	r.relayCooldown = true 
-	r.relayMutex.Unlock()
 
 	r.ExpectOpen = true
 	r.relayLine.SetValue(1)
 	r.logMessage("[HARDWARE] Strike relay energized.")
-
-	go func() {
-		time.Sleep(4 * time.Second) 
-		r.relayMutex.Lock()
-		if !r.SustainActive && r.ExpectOpen {
-			r.relayLine.SetValue(0)
-			r.ExpectOpen = false
-			r.logMessage("[HARDWARE] Strike relay de-energized.")
-		}
-		r.relayMutex.Unlock()
-		
-		time.Sleep(1 * time.Second) 
-		r.relayMutex.Lock()
-		r.relayCooldown = false 
-		r.relayMutex.Unlock()
-	}()
+	r.relockTime = time.Now().Add(4 * time.Second)
 }
 
 func (r *WiegandReader) ExecuteBuzzerPulse(pulses int) {
