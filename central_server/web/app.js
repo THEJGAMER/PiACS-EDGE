@@ -1762,7 +1762,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('cfg-dho-timeout').value = cc.dho_timeout_secs;
             document.getElementById('cfg-dho-prealarm').value = cc.dho_pre_alarm_secs;
             document.getElementById('cfg-dfo-enabled').checked = cc.dfo_enabled;
-            document.getElementById('cfg-apb-strict').checked = cc.apb_strict;
+            document.getElementById('cfg-apb-enabled').checked = cc.apb_enabled;
             document.getElementById('cfg-relock-on-open').checked = cc.relock_on_open || false;
             
             // Populate and set site ID dropdown
@@ -1872,7 +1872,7 @@ document.addEventListener('DOMContentLoaded', () => {
             dho_timeout_secs: parseInt(document.getElementById('cfg-dho-timeout').value),
             dho_pre_alarm_secs: parseInt(document.getElementById('cfg-dho-prealarm').value),
             dfo_enabled: document.getElementById('cfg-dfo-enabled').checked,
-            apb_strict: document.getElementById('cfg-apb-strict').checked,
+            apb_enabled: document.getElementById('cfg-apb-enabled').checked,
             relock_on_open: document.getElementById('cfg-relock-on-open').checked,
             site_id: document.getElementById('cfg-site').value ? parseInt(document.getElementById('cfg-site').value) : null
         };
