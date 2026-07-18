@@ -120,6 +120,13 @@ type Credential struct {
 	PinCode        *string `json:"pin_code"`
 }
 
+type UserProfile struct {
+	UserID       int          `json:"user_id"`
+	EmployeeName string       `json:"employee_name"`
+	IsActive     bool         `json:"is_active"`
+	Credentials  []Credential `json:"credentials"`
+}
+
 func main() {
 	loadEnvFile(".env")
 
@@ -478,162 +485,184 @@ func handleHolidays(w http.ResponseWriter, r *http.Request) {
 func handleCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method == http.MethodGet {
-		rows, err := dbConn.Query(`
-			SELECT c.id, c.user_id, u.employee_name, c.bit_length, c.facility_code, c.card_id, c.is_active,
-			       c.activation_date, c.expiration_date, c.pin_code
-			FROM credentials c JOIN users u ON c.user_id = u.user_id ORDER BY c.id`)
+		userRows, err := dbConn.Query("SELECT user_id, employee_name, is_active FROM users ORDER BY user_id DESC")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer rows.Close()
+		defer userRows.Close()
 
-		creds := []Credential{}
+		profiles := []UserProfile{}
+		for userRows.Next() {
+			var u UserProfile
+			err = userRows.Scan(&u.UserID, &u.EmployeeName, &u.IsActive)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			u.Credentials = []Credential{}
+			profiles = append(profiles, u)
+		}
+
+		for i := range profiles {
+			credRows, err := dbConn.Query(`
+				SELECT id, bit_length, facility_code, card_id, is_active, activation_date, expiration_date, pin_code 
+				FROM credentials WHERE user_id = $1 ORDER BY id`, profiles[i].UserID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for credRows.Next() {
+				var c Credential
+				var actTime, expTime time.Time
+				var pin sql.NullString
+				err = credRows.Scan(&c.ID, &c.BitLength, &c.FacilityCode, &c.CardID, &c.IsActive, &actTime, &expTime, &pin)
+				if err != nil {
+					credRows.Close()
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				c.UserID = profiles[i].UserID
+				c.EmployeeName = profiles[i].EmployeeName
+				c.ActivationDate = actTime.Format("2006-01-02")
+				c.ExpirationDate = expTime.Format("2006-01-02")
+				if pin.Valid {
+					c.PinCode = &pin.String
+				}
+				profiles[i].Credentials = append(profiles[i].Credentials, c)
+			}
+			credRows.Close()
+
+			for j := range profiles[i].Credentials {
+				alRows, err := dbConn.Query("SELECT access_level_id FROM credential_access_levels WHERE credential_id = $1", profiles[i].Credentials[j].ID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				profiles[i].Credentials[j].AccessLevels = []int{}
+				for alRows.Next() {
+					var alID int
+					alRows.Scan(&alID)
+					profiles[i].Credentials[j].AccessLevels = append(profiles[i].Credentials[j].AccessLevels, alID)
+				}
+				alRows.Close()
+			}
+		}
+
+		json.NewEncoder(w).Encode(profiles)
+
+	} else if r.Method == http.MethodPost || r.Method == http.MethodPut {
+		var u UserProfile
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		tx, err := dbConn.Begin()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		if u.UserID == 0 {
+			err = tx.QueryRow("INSERT INTO users (employee_name, is_active) VALUES ($1, $2) RETURNING user_id", u.EmployeeName, u.IsActive).Scan(&u.UserID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			_, err = tx.Exec("UPDATE users SET employee_name = $1, is_active = $2 WHERE user_id = $3", u.EmployeeName, u.IsActive, u.UserID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		existingCredIDs := make(map[int]bool)
+		rows, err := tx.Query("SELECT id FROM credentials WHERE user_id = $1", u.UserID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		for rows.Next() {
-			var c Credential
-			var actTime, expTime time.Time
-			var pin sql.NullString
-			err = rows.Scan(&c.ID, &c.UserID, &c.EmployeeName, &c.BitLength, &c.FacilityCode, &c.CardID, &c.IsActive, &actTime, &expTime, &pin)
+			var id int
+			rows.Scan(&id)
+			existingCredIDs[id] = true
+		}
+		rows.Close()
+
+		for _, c := range u.Credentials {
+			actDate := c.ActivationDate
+			if actDate == "" {
+				actDate = time.Now().Format("2006-01-02")
+			}
+			expDate := c.ExpirationDate
+			if expDate == "" {
+				expDate = time.Now().AddDate(1, 0, 0).Format("2006-01-02")
+			}
+
+			var credID int
+			if c.ID == 0 {
+				err = tx.QueryRow(`
+					INSERT INTO credentials (user_id, bit_length, facility_code, card_id, is_active, activation_date, expiration_date, pin_code) 
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+					u.UserID, c.BitLength, c.FacilityCode, c.CardID, c.IsActive, actDate, expDate, c.PinCode).Scan(&credID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				credID = c.ID
+				delete(existingCredIDs, credID)
+
+				_, err = tx.Exec(`
+					UPDATE credentials 
+					SET bit_length = $1, facility_code = $2, card_id = $3, is_active = $4, 
+					    activation_date = $5, expiration_date = $6, pin_code = $7
+					WHERE id = $8 AND user_id = $9`,
+					c.BitLength, c.FacilityCode, c.CardID, c.IsActive, actDate, expDate, c.PinCode, credID, u.UserID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+
+				_, err = tx.Exec("DELETE FROM credential_access_levels WHERE credential_id = $1", credID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+
+			for _, alID := range c.AccessLevels {
+				_, err = tx.Exec("INSERT INTO credential_access_levels (credential_id, access_level_id) VALUES ($1, $2)", credID, alID)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		for delID := range existingCredIDs {
+			_, err = tx.Exec("DELETE FROM credential_access_levels WHERE credential_id = $1", delID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			c.ActivationDate = actTime.Format("2006-01-02")
-			c.ExpirationDate = expTime.Format("2006-01-02")
-			if pin.Valid {
-				c.PinCode = &pin.String
-			}
-			creds = append(creds, c)
-		}
-
-		for i := range creds {
-			alRows, err := dbConn.Query("SELECT access_level_id FROM credential_access_levels WHERE credential_id = $1", creds[i].ID)
+			_, err = tx.Exec("DELETE FROM credentials WHERE id = $1 AND user_id = $2", delID, u.UserID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			creds[i].AccessLevels = []int{}
-			for alRows.Next() {
-				var alID int
-				alRows.Scan(&alID)
-				creds[i].AccessLevels = append(creds[i].AccessLevels, alID)
-			}
-			alRows.Close()
 		}
 
-		json.NewEncoder(w).Encode(creds)
-
-	} else if r.Method == http.MethodPost {
-		var c Credential
-		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		tx, err := dbConn.Begin()
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		var userID int
-		err = tx.QueryRow("SELECT user_id FROM users WHERE employee_name = $1", c.EmployeeName).Scan(&userID)
-		if err == sql.ErrNoRows {
-			err = tx.QueryRow("INSERT INTO users (employee_name) VALUES ($1) RETURNING user_id", c.EmployeeName).Scan(&userID)
-			if err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		} else if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		actDate := c.ActivationDate
-		if actDate == "" {
-			actDate = time.Now().Format("2006-01-02")
-		}
-		expDate := c.ExpirationDate
-		if expDate == "" {
-			expDate = time.Now().AddDate(1, 0, 0).Format("2006-01-02")
-		}
-
-		var credID int
-		err = tx.QueryRow(`
-			INSERT INTO credentials (user_id, bit_length, facility_code, card_id, is_active, activation_date, expiration_date, pin_code) 
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-			userID, c.BitLength, c.FacilityCode, c.CardID, c.IsActive, actDate, expDate, c.PinCode).Scan(&credID)
-		if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, alID := range c.AccessLevels {
-			_, err = tx.Exec("INSERT INTO credential_access_levels (credential_id, access_level_id) VALUES ($1, $2)", credID, alID)
-			if err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		tx.Commit()
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "id": credID})
-
-	} else if r.Method == http.MethodPut {
-		var c Credential
-		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		tx, err := dbConn.Begin()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_, err = tx.Exec("UPDATE users SET employee_name = $1, is_active = $2 WHERE user_id = $3", c.EmployeeName, c.IsActive, c.UserID)
-		if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_, err = tx.Exec(`
-			UPDATE credentials 
-			SET bit_length = $1, facility_code = $2, card_id = $3, is_active = $4, 
-			    activation_date = $5, expiration_date = $6, pin_code = $7
-			WHERE id = $8`,
-			c.BitLength, c.FacilityCode, c.CardID, c.IsActive, c.ActivationDate, c.ExpirationDate, c.PinCode, c.ID)
-		if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		_, err = tx.Exec("DELETE FROM credential_access_levels WHERE credential_id = $1", c.ID)
-		if err != nil {
-			tx.Rollback()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, alID := range c.AccessLevels {
-			_, err = tx.Exec("INSERT INTO credential_access_levels (credential_id, access_level_id) VALUES ($1, $2)", c.ID, alID)
-			if err != nil {
-				tx.Rollback()
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-		}
-
-		tx.Commit()
-		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success"})
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success", "user_id": u.UserID})
 
 	} else if r.Method == http.MethodDelete {
 		idStr := r.URL.Query().Get("id")
@@ -641,7 +670,7 @@ func handleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Missing id", http.StatusBadRequest)
 			return
 		}
-		id, err := strconv.Atoi(idStr)
+		userID, err := strconv.Atoi(idStr)
 		if err != nil {
 			http.Error(w, "Invalid id", http.StatusBadRequest)
 			return
@@ -652,15 +681,32 @@ func handleCredentials(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		defer tx.Rollback()
 
-		_, err = tx.Exec("DELETE FROM credentials WHERE id = $1", id)
+		_, err = tx.Exec(`
+			DELETE FROM credential_access_levels 
+			WHERE credential_id IN (SELECT id FROM credentials WHERE user_id = $1)`, userID)
 		if err != nil {
-			tx.Rollback()
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		tx.Commit()
+		_, err = tx.Exec("DELETE FROM credentials WHERE user_id = $1", userID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = tx.Exec("DELETE FROM users WHERE user_id = $1", userID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"status": "success"})
 	}
 }

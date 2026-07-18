@@ -131,10 +131,8 @@
                                 <thead>
                                     <tr>
                                         <th>Employee</th>
-                                        <th>Card Format</th>
-                                        <th>FC/CardID</th>
-                                        <th>Active Range</th>
                                         <th>Status</th>
+                                        <th>Card Credentials</th>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
@@ -282,13 +280,12 @@
                 <!-- Side-Drawer for Cardholder Profile Details -->
                 <div id="cardholder-drawer" class="side-drawer">
                     <div class="drawer-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
-                        <h4 style="margin: 0; color: #fff;">👤 Cardholder Profile Properties</h4>
+                        <h4 style="margin: 0; color: #fff;">👤 Person Profile Properties</h4>
                         <button class="btn-close-drawer" id="btn-close-cardholder-drawer" type="button" style="background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; line-height: 1;">×</button>
                     </div>
                     <div class="drawer-body" style="height: calc(100% - 70px); overflow-y: auto; padding-right: 0.5rem;">
                         <form id="form-credential" class="form-container">
                             <input type="hidden" id="cred-user-id" value="">
-                            <input type="hidden" id="cred-id" value="">
                             
                             <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
                                 <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-blue);">👤 Personal Identity</h5>
@@ -296,58 +293,25 @@
                                     <label for="cred-name">Employee Full Name</label>
                                     <input type="text" id="cred-name" required placeholder="e.g. Sarah Jenkins">
                                 </div>
-                            </div>
-
-                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
-                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-green);">💳 Badge Credentials</h5>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                                    <div class="form-group">
-                                        <label for="cred-fc">Facility Code</label>
-                                        <input type="number" id="cred-fc" required placeholder="3242" min="0">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="cred-cid">Card ID (Badge)</label>
-                                        <input type="number" id="cred-cid" required placeholder="669653" min="0">
-                                    </div>
-                                </div>
-                                <div class="form-group">
-                                    <label for="cred-bits">Wiegand Bit Length</label>
-                                    <input type="number" id="cred-bits" value="35" required min="26" max="64">
-                                </div>
-                                <div class="form-group">
-                                    <label for="cred-pin">Keypad PIN Code (Optional)</label>
-                                    <input type="password" id="cred-pin" placeholder="e.g. 1234" maxlength="8">
-                                </div>
-                            </div>
-
-                            <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
-                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-amber);">🗓️ Expiration & Validity</h5>
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-                                    <div class="form-group">
-                                        <label for="cred-start-date">Activation</label>
-                                        <input type="date" id="cred-start-date" required>
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="cred-end-date">Expiration</label>
-                                        <input type="date" id="cred-end-date" required>
-                                    </div>
-                                </div>
                                 <div class="form-group checkbox-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem;">
                                     <input type="checkbox" id="cred-active" checked style="width: auto;">
-                                    <label for="cred-active" style="margin: 0; cursor: pointer;">Credential Active Status</label>
+                                    <label for="cred-active" style="margin: 0; cursor: pointer;">Profile Active Status</label>
                                 </div>
                             </div>
 
                             <div class="drawer-section" style="margin-bottom: 1.5rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem;">
-                                <h5 style="margin-top: 0; margin-bottom: 1rem; color: var(--accent-red);">🛡️ Access Level Mapping</h5>
-                                <div id="cred-access-levels-container" class="checkbox-list" style="max-height: 180px; overflow-y: auto; border: 1px solid var(--border-color); padding: 0.5rem; border-radius: 4px; background: rgba(0,0,0,0.2);">
-                                    <!-- Populated dynamically -->
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                    <h5 style="margin: 0; color: var(--accent-green); display: flex; align-items: center; gap: 0.5rem;">💳 Assigned Cards</h5>
+                                    <button type="button" class="btn btn-submit" id="btn-drawer-add-card" style="padding: 0.25rem 0.75rem; font-size: 12px; height: auto; width: auto; margin: 0;">➕ Add Card</button>
+                                </div>
+                                <div id="drawer-cards-list" style="display: flex; flex-direction: column; gap: 1rem;">
+                                    <!-- Dynamic card blocks populated by javascript -->
                                 </div>
                             </div>
 
                             <div class="drawer-footer" style="display: flex; gap: 0.5rem; margin-top: 1.5rem; padding-bottom: 1rem;">
                                 <button type="button" class="btn btn-secondary" id="btn-cancel-badge" style="flex: 1;">Cancel</button>
-                                <button type="submit" class="btn btn-submit" id="btn-save-badge" style="flex: 2;">Save Cardholder</button>
+                                <button type="submit" class="btn btn-submit" id="btn-save-badge" style="flex: 2;">Save Profile</button>
                             </div>
                         </form>
                     </div>

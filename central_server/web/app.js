@@ -69,23 +69,123 @@ document.addEventListener('DOMContentLoaded', () => {
     const cancelBadgeBtn = document.getElementById('btn-cancel-badge');
     const addCardholderBtn = document.getElementById('btn-add-cardholder');
 
+    function addCardBlock(card = null) {
+        const container = document.getElementById('drawer-cards-list');
+        const cardBlock = document.createElement('div');
+        cardBlock.className = 'card-block';
+        cardBlock.style.background = 'rgba(255,255,255,0.01)';
+        cardBlock.style.border = '1px solid var(--border-color)';
+        cardBlock.style.borderRadius = '8px';
+        cardBlock.style.padding = '1rem';
+        cardBlock.style.position = 'relative';
+        cardBlock.style.marginBottom = '1rem';
+
+        const id = card ? card.id : 0;
+        const fc = card ? card.facility_code : '';
+        const cid = card ? card.card_id : '';
+        const bits = card ? card.bit_length : 35;
+        const pin = card ? (card.pin_code || '') : '';
+        const active = card ? card.is_active : true;
+        
+        let actDate = '';
+        if (card && card.activation_date) {
+            actDate = card.activation_date.split('T')[0];
+        } else {
+            actDate = new Date().toISOString().split('T')[0];
+        }
+
+        let expDate = '';
+        if (card && card.expiration_date) {
+            expDate = card.expiration_date.split('T')[0];
+        } else {
+            const nextYear = new Date();
+            nextYear.setFullYear(nextYear.getFullYear() + 1);
+            expDate = nextYear.toISOString().split('T')[0];
+        }
+
+        let alChecklistHtml = '';
+        allAccessLevelsData.forEach(al => {
+            const isChecked = card && card.access_levels && card.access_levels.includes(al.id) ? 'checked' : '';
+            alChecklistHtml += `
+                <label style="display: block; margin-bottom: 6px; cursor: pointer;">
+                    <input type="checkbox" class="card-al-checkbox" data-al-id="${al.id}" ${isChecked}>
+                    <span style="font-weight: bold; color: #fff; font-size: 13px;">${al.name}</span>
+                    <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
+                </label>
+            `;
+        });
+
+        cardBlock.innerHTML = `
+            <input type="hidden" class="card-id" value="${id}">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 6px;">
+                <span style="font-weight: bold; color: var(--accent-green); font-size: 13px;">Card Properties</span>
+                <button type="button" class="btn btn-secondary btn-delete-card-block" style="padding: 2px 6px; font-size: 11px; margin: 0; color: #f87171; border-color: rgba(239,68,68,0.2); width: auto; height: auto;">Remove</button>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 8px;">
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">Facility Code</label>
+                    <input type="number" class="card-fc" required placeholder="FC" value="${fc}" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">Card ID (Badge)</label>
+                    <input type="number" class="card-cid" required placeholder="Card ID" value="${cid}" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 8px;">
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">Bit Length</label>
+                    <input type="number" class="card-bits" required value="${bits}" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">PIN (Optional)</label>
+                    <input type="password" class="card-pin" placeholder="PIN" value="${pin}" maxlength="8" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 8px;">
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">Activation</label>
+                    <input type="date" class="card-start-date" required value="${actDate}" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+                <div class="form-group" style="margin-bottom: 4px;">
+                    <label style="font-size: 11px; margin-bottom: 2px;">Expiration</label>
+                    <input type="date" class="card-end-date" required value="${expDate}" style="padding: 4px 8px; font-size: 13px;">
+                </div>
+            </div>
+
+            <div class="form-group checkbox-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 6px; margin-bottom: 10px;">
+                <input type="checkbox" class="card-active" ${active ? 'checked' : ''} style="width: auto;">
+                <label style="margin: 0; cursor: pointer; font-size: 12px;">Card Active Status</label>
+            </div>
+
+            <div style="margin-top: 8px;">
+                <label style="font-size: 11px; font-weight: bold; color: var(--text-secondary); display: block; margin-bottom: 4px;">Access Levels</label>
+                <div class="checkbox-list" style="max-height: 120px; overflow-y: auto; border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; background: rgba(0,0,0,0.2);">
+                    ${alChecklistHtml}
+                </div>
+            </div>
+        `;
+
+        cardBlock.querySelector('.btn-delete-card-block').addEventListener('click', () => {
+            cardBlock.remove();
+        });
+
+        container.appendChild(cardBlock);
+    }
+
     function openDrawer(isEdit = false) {
         drawer.classList.add('drawer-open');
         if (!isEdit) {
             document.getElementById('form-credential').reset();
-            document.getElementById('cred-id').value = '';
             document.getElementById('cred-user-id').value = '';
-            document.getElementById('btn-save-badge').innerText = 'Register Badge Credential';
+            document.getElementById('cred-active').checked = true;
+            document.getElementById('btn-save-badge').innerText = 'Register Profile';
             
-            // Set default validity dates
-            const todayStr = new Date().toISOString().split('T')[0];
-            document.getElementById('cred-start-date').value = todayStr;
-            const nextYear = new Date();
-            nextYear.setFullYear(nextYear.getFullYear() + 1);
-            document.getElementById('cred-end-date').value = nextYear.toISOString().split('T')[0];
-
-            // Uncheck all access levels
-            document.querySelectorAll('input[name="cred-al"]').forEach(cb => cb.checked = false);
+            // Clear dynamic cards list and add one empty card block
+            document.getElementById('drawer-cards-list').innerHTML = '';
+            addCardBlock();
         }
     }
 
@@ -95,6 +195,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (addCardholderBtn) {
         addCardholderBtn.addEventListener('click', () => openDrawer(false));
+    }
+    const drawerAddCardBtn = document.getElementById('btn-drawer-add-card');
+    if (drawerAddCardBtn) {
+        drawerAddCardBtn.addEventListener('click', () => addCardBlock());
     }
     if (closeDrawerBtn) {
         closeDrawerBtn.addEventListener('click', closeDrawer);
@@ -821,18 +925,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await res.json();
         allAccessLevelsData = data;
         const credContainer = document.getElementById('cred-access-levels-container');
-        credContainer.innerHTML = '';
-        data.forEach(al => {
-            const lbl = document.createElement('label');
-            lbl.style.display = 'block';
-            lbl.style.marginBottom = '6px';
-            lbl.innerHTML = `
-                <input type="checkbox" name="cred-al" value="${al.id}">
-                <span style="font-weight: bold; color: #fff;">${al.name}</span>
-                <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
-            `;
-            credContainer.appendChild(lbl);
-        });
+        if (credContainer) {
+            credContainer.innerHTML = '';
+            data.forEach(al => {
+                const lbl = document.createElement('label');
+                lbl.style.display = 'block';
+                lbl.style.marginBottom = '6px';
+                lbl.innerHTML = `
+                    <input type="checkbox" name="cred-al" value="${al.id}">
+                    <span style="font-weight: bold; color: #fff;">${al.name}</span>
+                    <span style="color: #888; font-size: 11px;">(${al.mappings ? al.mappings.map(m => m.reader_id).join(', ') : 'No readers'})</span>
+                `;
+                credContainer.appendChild(lbl);
+            });
+        }
         renderAccessLevels(data);
     }
 
@@ -967,6 +1073,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Credentials / Badges Management
+    // Credentials / Badges Management
     async function loadCredentials() {
         const res = await fetch('/api/credentials');
         const data = await res.json();
@@ -980,56 +1087,83 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const today = new Date();
 
-        const filtered = credentialsCache.filter(c => {
-            const nameMatch = c.employee_name.toLowerCase().includes(currentFilterSearch);
-            const cardMatch = String(c.card_id).includes(currentFilterSearch);
+        const filtered = credentialsCache.filter(user => {
+            const nameMatch = user.employee_name.toLowerCase().includes(currentFilterSearch);
+            const cardMatch = user.credentials.some(c => String(c.card_id).includes(currentFilterSearch));
             if (!nameMatch && !cardMatch) return false;
 
-            const expDate = new Date(c.expiration_date);
-            const isExpired = expDate < today;
+            const isExpired = user.credentials.every(c => new Date(c.expiration_date) < today);
+            const hasActiveCard = user.credentials.some(c => c.is_active && new Date(c.expiration_date) >= today);
 
             if (currentFilterStatus === 'ACTIVE') {
-                return c.is_active && !isExpired;
+                return user.is_active && hasActiveCard;
             } else if (currentFilterStatus === 'EXPIRED') {
                 return isExpired;
             } else if (currentFilterStatus === 'INACTIVE') {
-                return !c.is_active && !isExpired;
+                return !user.is_active || (user.credentials.length > 0 && !hasActiveCard);
             }
             return true;
         });
 
-        filtered.forEach(c => {
+        filtered.forEach(user => {
             const tr = document.createElement('tr');
             
             // Build initials avatar circle
-            const nameParts = c.employee_name.split(' ');
+            const nameParts = user.employee_name.split(' ');
             const initials = nameParts.map(p => p[0]).join('').slice(0, 2).toUpperCase();
             
             // Assign deterministic color class based on employee name
             const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
-            const colorIdx = c.employee_name.length % colors.length;
+            const colorIdx = user.employee_name.length % colors.length;
             const avatarColor = colors[colorIdx];
 
-            const expDate = new Date(c.expiration_date);
-            const isExpired = expDate < today;
-            
             let statusClass = 'secure';
             let statusText = 'ACTIVE';
-            if (isExpired) {
-                statusClass = 'offline';
-                statusText = 'EXPIRED';
-            } else if (!c.is_active) {
+            const hasActiveCard = user.credentials.some(c => c.is_active && new Date(c.expiration_date) >= today);
+            if (!user.is_active) {
                 statusClass = 'offline';
                 statusText = 'INACTIVE';
+            } else if (user.credentials.length === 0) {
+                statusClass = 'offline';
+                statusText = 'NO CARDS';
+            } else if (!hasActiveCard) {
+                const allExpired = user.credentials.every(c => new Date(c.expiration_date) < today);
+                if (allExpired) {
+                    statusClass = 'offline';
+                    statusText = 'EXPIRED';
+                } else {
+                    statusClass = 'offline';
+                    statusText = 'CARDS INACTIVE';
+                }
             }
 
-            // Map access level names for readability
-            let alNames = 'No entry rights';
-            if (c.access_levels && c.access_levels.length > 0) {
-                alNames = c.access_levels.map(alId => {
-                    const al = allAccessLevelsData.find(x => x.id === alId);
-                    return al ? al.name : `Level ${alId}`;
-                }).join(', ');
+            // Build dynamic list of card credential descriptions
+            let cardsHtml = '<span style="color: var(--text-secondary); font-size: 13px;">No cards assigned</span>';
+            if (user.credentials && user.credentials.length > 0) {
+                cardsHtml = '<div style="display: flex; flex-direction: column; gap: 6px;">';
+                user.credentials.forEach(c => {
+                    const cExpired = new Date(c.expiration_date) < today;
+                    let cStatusLabel = c.is_active && !cExpired ? 'Active' : (cExpired ? 'Expired' : 'Inactive');
+                    let cStatusClass = c.is_active && !cExpired ? 'color: #10b981' : 'color: #ef4444';
+                    
+                    let alNames = 'No entry rights';
+                    if (c.access_levels && c.access_levels.length > 0) {
+                        alNames = c.access_levels.map(alId => {
+                            const al = allAccessLevelsData.find(x => x.id === alId);
+                            return al ? al.name : `Level ${alId}`;
+                        }).join(', ');
+                    }
+
+                    cardsHtml += `
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; display: inline-block;">
+                            <span style="font-family: monospace; font-size: 13px; font-weight: bold; color: #fff;">FC:${c.facility_code} / ID:${c.card_id}</span>
+                            <span style="font-size: 11px; margin-left: 8px; ${cStatusClass}">(${cStatusLabel})</span>
+                            <span style="font-size: 11px; color: var(--text-secondary); margin-left: 8px;">Wiegand ${c.bit_length}-bit</span>
+                            <div style="font-size: 11px; color: #888; margin-top: 2px;">🔑 ${alNames}</div>
+                        </div>
+                    `;
+                });
+                cardsHtml += '</div>';
             }
 
             tr.innerHTML = `
@@ -1037,27 +1171,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <div class="avatar-circle" style="background: ${avatarColor};">${initials}</div>
                         <div>
-                            <span style="font-weight: bold; color: #fff; font-size: 14px;">${c.employee_name}</span>
-                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">User ID: ${c.user_id}</div>
+                            <span style="font-weight: bold; color: #fff; font-size: 14px;">${user.employee_name}</span>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">User ID: ${user.user_id}</div>
                         </div>
                     </div>
                 </td>
-                <td style="font-family: monospace;">Wiegand ${c.bit_length} bit</td>
-                <td>
-                    <span style="color: #60a5fa; font-weight: 500;">FC: ${c.facility_code}</span> / 
-                    <span style="color: #fff; font-weight: bold;">ID: ${c.card_id}</span>
-                </td>
-                <td style="color: var(--text-secondary);">
-                    <div>${formatDateOnly(c.activation_date)}</div>
-                    <div style="font-size: 11px; color: #555; margin-top: 2px;">to ${formatDateOnly(c.expiration_date)}</div>
-                </td>
                 <td>
                     <span class="status-badge ${statusClass}">${statusText}</span>
-                    <div style="font-size: 11px; color: #888; margin-top: 4px; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${alNames}">🔑 ${alNames}</div>
                 </td>
                 <td>
-                    <button class="btn btn-secondary btn-cred-edit" data-id="${c.id}" style="padding: 4px 8px; font-size: 12px; display: inline-block;">Edit</button>
-                    <button class="btn btn-secondary btn-cred-delete" data-id="${c.id}" style="padding: 4px 8px; font-size: 12px; display: inline-block; border-color: rgba(239,68,68,0.2); color: #f87171;">Delete</button>
+                    ${cardsHtml}
+                </td>
+                <td>
+                    <button class="btn btn-secondary btn-cred-edit" data-id="${user.user_id}" style="padding: 4px 8px; font-size: 12px; display: inline-block;">Edit</button>
+                    <button class="btn btn-secondary btn-cred-delete" data-id="${user.user_id}" style="padding: 4px 8px; font-size: 12px; display: inline-block; border-color: rgba(239,68,68,0.2); color: #f87171;">Delete</button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -1066,10 +1193,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Bind Edit buttons
         tbody.querySelectorAll('.btn-cred-edit').forEach(btn => {
             btn.addEventListener('click', () => {
-                const credId = parseInt(btn.getAttribute('data-id'));
-                const cred = credentialsCache.find(x => x.id === credId);
-                if (cred) {
-                    startEditCredential(cred);
+                const userId = parseInt(btn.getAttribute('data-id'));
+                const user = credentialsCache.find(x => x.user_id === userId);
+                if (user) {
+                    startEditCredential(user);
                 }
             });
         });
@@ -1077,9 +1204,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Bind Delete buttons
         tbody.querySelectorAll('.btn-cred-delete').forEach(btn => {
             btn.addEventListener('click', async () => {
-                const credId = btn.getAttribute('data-id');
-                if (confirm('Are you sure you want to delete this credential? This cannot be undone.')) {
-                    const res = await fetch(`/api/credentials?id=${credId}`, { method: 'DELETE' });
+                const userId = btn.getAttribute('data-id');
+                if (confirm('Are you sure you want to delete this profile? This will delete the person and all their assigned cards. This cannot be undone.')) {
+                    const res = await fetch(`/api/credentials?id=${userId}`, { method: 'DELETE' });
                     if (res.ok) {
                         loadCredentials();
                     }
@@ -1088,22 +1215,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function startEditCredential(c) {
-        document.getElementById('cred-id').value = c.id;
-        document.getElementById('cred-user-id').value = c.user_id;
-        document.getElementById('cred-name').value = c.employee_name;
-        document.getElementById('cred-fc').value = c.facility_code;
-        document.getElementById('cred-cid').value = c.card_id;
-        document.getElementById('cred-bits').value = c.bit_length;
-        document.getElementById('cred-pin').value = c.pin_code || '';
-        document.getElementById('cred-start-date').value = c.activation_date.split('T')[0];
-        document.getElementById('cred-end-date').value = c.expiration_date.split('T')[0];
-        document.getElementById('cred-active').checked = c.is_active;
+    function startEditCredential(user) {
+        document.getElementById('cred-user-id').value = user.user_id;
+        document.getElementById('cred-name').value = user.employee_name;
+        document.getElementById('cred-active').checked = user.is_active;
 
-        // Reset and apply access levels checks
-        document.querySelectorAll('input[name="cred-al"]').forEach(cb => {
-            cb.checked = (c.access_levels || []).includes(parseInt(cb.value));
-        });
+        // Populate cards
+        const container = document.getElementById('drawer-cards-list');
+        container.innerHTML = '';
+        if (user.credentials && user.credentials.length > 0) {
+            user.credentials.forEach(c => addCardBlock(c));
+        } else {
+            addCardBlock();
+        }
 
         document.getElementById('btn-save-badge').innerText = 'Save Changes';
         openDrawer(true);
@@ -1111,40 +1235,61 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function saveCredential(e) {
         e.preventDefault();
-        const id = document.getElementById('cred-id').value;
         const userId = document.getElementById('cred-user-id').value;
-        const name = document.getElementById('cred-name').value;
-        const fc = parseInt(document.getElementById('cred-fc').value);
-        const cardId = parseInt(document.getElementById('cred-cid').value);
-        const bits = parseInt(document.getElementById('cred-bits').value);
-        const pin = document.getElementById('cred-pin').value.trim() || null;
-        const startDate = document.getElementById('cred-start-date').value;
-        const endDate = document.getElementById('cred-end-date').value;
+        const name = document.getElementById('cred-name').value.trim();
         const active = document.getElementById('cred-active').checked;
 
-        const alIds = [];
-        document.querySelectorAll('input[name="cred-al"]:checked').forEach(cb => {
-            alIds.push(parseInt(cb.value));
+        // Build credentials array from dynamic blocks
+        const credentials = [];
+        const cardBlocks = document.querySelectorAll('#drawer-cards-list .card-block');
+        
+        let valid = true;
+        cardBlocks.forEach(block => {
+            const id = parseInt(block.querySelector('.card-id').value) || 0;
+            const fcInput = block.querySelector('.card-fc');
+            const cidInput = block.querySelector('.card-cid');
+            const bitsInput = block.querySelector('.card-bits');
+            const pinInput = block.querySelector('.card-pin');
+            const startDateInput = block.querySelector('.card-start-date');
+            const endDateInput = block.querySelector('.card-end-date');
+            const activeInput = block.querySelector('.card-active');
+
+            if (!fcInput.value || !cidInput.value) {
+                alert('Facility Code and Card ID are required for all cards.');
+                valid = false;
+                return;
+            }
+
+            // Gather access levels checkboxes
+            const accessLevels = [];
+            block.querySelectorAll('.card-al-checkbox:checked').forEach(cb => {
+                accessLevels.push(parseInt(cb.getAttribute('data-al-id')));
+            });
+
+            credentials.push({
+                id,
+                user_id: userId ? parseInt(userId) : 0,
+                bit_length: parseInt(bitsInput.value) || 35,
+                facility_code: parseInt(fcInput.value),
+                card_id: parseInt(cidInput.value),
+                is_active: activeInput.checked,
+                activation_date: startDateInput.value,
+                expiration_date: endDateInput.value,
+                pin_code: pinInput.value.trim() || null,
+                access_levels: accessLevels
+            });
         });
 
+        if (!valid) return;
+
         const payload = {
-            id: id ? parseInt(id) : 0,
             user_id: userId ? parseInt(userId) : 0,
             employee_name: name,
-            bit_length: bits,
-            facility_code: fc,
-            card_id: cardId,
             is_active: active,
-            access_levels: alIds,
-            activation_date: startDate,
-            expiration_date: endDate,
-            pin_code: pin
+            credentials: credentials
         };
 
-        let method = 'POST';
-        if (id) {
-            method = 'PUT';
-        }
+        const method = userId ? 'PUT' : 'POST';
 
         const res = await fetch('/api/credentials', {
             method,
