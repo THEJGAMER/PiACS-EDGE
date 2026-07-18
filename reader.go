@@ -25,8 +25,8 @@ type WiegandReader struct {
 	hornLine      *gpiocdev.Line 
 	logger        *log.Logger
 
-	// Operational State Machine Latches
 	ExpectOpen     bool
+	AuthorizedOpen bool
 	DhoBypassed    bool
 	DoorOpenedAt   time.Time
 	DhoTriggered   bool
@@ -191,6 +191,11 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 						alarmCallback("DOOR_OPEN", "Door position status changed to OPEN.")
 					}
 
+					// Set authorized open flag if strike is currently energized (ExpectOpen is true)
+					if r.ExpectOpen {
+						r.AuthorizedOpen = true
+					}
+
 					// Relock on Open logic
 					if r.ExpectOpen && r.Cfg.RelockOnOpen {
 						r.relayMutex.Lock()
@@ -203,7 +208,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 					}
 
 					// 1. DFO TRACKING LAYER
-					if !r.ExpectOpen && r.Cfg.DfoEnabled {
+					if !r.ExpectOpen && !r.AuthorizedOpen && r.Cfg.DfoEnabled {
 						if !r.DfoTriggered {
 							r.DfoTriggered = true 
 							r.logMessage("[ALARM-CRITICAL] Door Forced Open (DFO) Detected! No authorization signal active.")
@@ -213,7 +218,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 					}
 
 					// 2. TIMED DHO TRACKING LAYER (Runs if authorized OR if DFO is turned off)
-					if r.ExpectOpen || !r.Cfg.DfoEnabled {
+					if r.ExpectOpen || r.AuthorizedOpen || !r.Cfg.DfoEnabled {
 						if r.Cfg.DhoEnabled && !r.DhoBypassed {
 							elapsedSecs := time.Since(r.DoorOpenedAt).Seconds()
 
@@ -247,6 +252,7 @@ func (r *WiegandReader) StartListening(stopChan chan struct{}, alarmCallback fun
 						r.DfoTriggered = false 
 						r.PreAlarmActive = false
 						r.ExpectOpen = false
+						r.AuthorizedOpen = false
 						r.DhoBypassed = false
 						r.buzzLine.SetValue(0)
 						r.hornLine.SetValue(0) 
