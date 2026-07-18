@@ -751,6 +751,14 @@ func main() {
 					if err != nil {
 						edgeLogger.Printf("[DENY] Card profile unregistered or lookup failed: FC:%d ID:%d | Error: %v\n", fc, cid, err)
 						reader.ExecuteBuzzerPulse(3)
+						if dbConn != nil && !isOffline {
+							denyDetails := fmt.Sprintf("Unrecognized card swipe attempted. Facility Code: %d, Card ID: %d", fc, cid)
+							empLabel := fmt.Sprintf("Unrecognized (FC:%d ID:%d)", fc, cid)
+							ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+							_, _ = dbConn.ExecContext(ctx, "INSERT INTO access_logs (controller_id, card_id, employee_name, event_type, details) VALUES ($1, $2, $3, 'CARD_UNRECOGNIZED', $4)",
+								runtimeState.ControllerID, cid, empLabel, denyDetails)
+							cancel()
+						}
 						return
 					}
 					uAct = (uActInt == 1)

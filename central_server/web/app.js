@@ -537,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (filterType === 'GRANT') {
                 if (e.event_type !== 'CARD_GRANT') return false;
             } else if (filterType === 'DENY') {
-                if (e.event_type !== 'DENY' && e.event_type !== 'DENY_SCHEDULE') return false;
+                if (e.event_type !== 'DENY' && e.event_type !== 'DENY_SCHEDULE' && e.event_type !== 'CARD_UNRECOGNIZED') return false;
             } else if (filterType === 'ALARM') {
                 if (e.event_source !== 'system_alarms' && !['DFO', 'DHO', 'APB_VIOLATION'].includes(e.event_type)) return false;
             }
@@ -572,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const et = e.event_type;
                 typeLabel = et;
                 if (et.includes('GRANT')) typeClass = 'grant';
-                else if (et.includes('DENY') || et.includes('REJECT')) typeClass = 'deny';
+                else if (et.includes('DENY') || et.includes('REJECT') || et.includes('UNRECOGNIZED')) typeClass = 'deny';
                 else if (et.includes('ALARM') || ['DFO', 'DHO', 'APB_VIOLATION'].includes(et)) typeClass = 'alarm';
                 else if (et.includes('WARN')) typeClass = 'warn';
             }
@@ -2157,7 +2157,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const et = e.event_type;
                 if (et === 'CARD_GRANT') {
                     typeClass = 'grant';
-                } else if (et === 'DENY' || et === 'DENY_SCHEDULE') {
+                } else if (et === 'DENY' || et === 'DENY_SCHEDULE' || et === 'CARD_UNRECOGNIZED') {
                     typeClass = 'deny';
                 } else if (et === 'DOOR_OPEN' || et === 'DOOR_CLOSE') {
                     typeClass = 'open-close';
